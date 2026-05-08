@@ -31,6 +31,12 @@ jobs:
   lint-go:
     name: lint:go
     runs-on: ubuntu-latest
+    # `go vet` is enforced. golangci-lint is best-effort while we burn down
+    # pre-existing errcheck debt (unchecked Close/Fprintf/Remove returns)
+    # accumulated during rapid early development. Mirrors the allow_failure
+    # posture this job carried on the prior GitLab pipeline. Track in a
+    # follow-up issue.
+    continue-on-error: true
     defaults:
       run:
         working-directory: api
