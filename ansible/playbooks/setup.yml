@@ -1,0 +1,42 @@
+---
+- name: Cluster Prep
+  hosts: k3s
+  gather_facts: true
+  become: true
+  vars:
+    cluster_id: "{{ cluster_id | default('homelab') }}"
+    k3s_version: "{{ k3s_version | default('v1.31.12+k3s1') }}"
+  roles:
+    - role: raspberrypi
+
+- name: Setup K3S Server
+  hosts: server
+  become: true
+  vars:
+    cluster_id: "{{ cluster_id | default('homelab') }}"
+    k3s_version: "{{ k3s_version | default('v1.31.12+k3s1') }}"
+  roles:
+    - role: k3s_server
+      server_config_yaml: |
+        disable:
+          - traefik
+
+- name: Setup K3S agent
+  hosts: agent
+  become: true
+  vars:
+    cluster_id: "{{ cluster_id | default('homelab') }}"
+    k3s_version: "{{ k3s_version | default('v1.31.12+k3s1') }}"
+  roles:
+    - role: k3s_agent
+
+- name: Setup Outside Cluster Tools
+  hosts: server
+  become: true
+  vars:
+    cluster_id: "{{ cluster_id | default('homelab') }}"
+    k3s_version: "{{ k3s_version | default('v1.31.12+k3s1') }}"
+  roles:
+    - role: outside_cluster_tools
+
+    

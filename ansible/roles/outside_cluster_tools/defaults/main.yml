@@ -1,0 +1,4 @@
+---
+# Default group name where the k3s server (control plane) lives.
+# Override via group_vars or extra_vars if your inventory uses a different group.
+server_group: server  # noqa var-naming[no-role-prefix]

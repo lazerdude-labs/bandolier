@@ -1,0 +1,16 @@
+- name: Copy /etc/rancher/k3s/k3s.yaml to ~/.kube/config
+  fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: ~/.kube/config
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    flat: yes
+    mode: '0600'
+
+- name: Replace old IP with k3s server ip in k3s.yml
+  delegate_to: localhost
+  become: false
+  ansible.builtin.replace:
+    path: ~/.kube/config
+    regexp: '127.0.0.1'
+    replace: "{{ hostvars[groups[server_group][0]]['ansible_host'] }}"

@@ -1,0 +1,94 @@
+services:
+  vault:
+    image: hashicorp/vault:1.16
+    container_name: bandolier-vault
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_LOCAL_CONFIG: |
+        ui = false
+        disable_mlock = false
+        listener "tcp" {
+          address = "0.0.0.0:8200"
+          tls_disable = 1
+        }
+        storage "file" {
+          path = "/vault/file"
+        }
+        api_addr = "http://vault:8200"
+    command: ["server"]
+    volumes:
+      - vault-data:/vault/file
+    networks:
+      - bandolier
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8200/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  vault-agent:
+    build: ./vault-init
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: http://vault:8200
+      # VAULT_AGENT_INTERVAL: 10  # seconds between seal-status checks
+    volumes:
+      - vault-init-state:/state
+    networks:
+      - bandolier
+    restart: unless-stopped
+
+  tls-init:
+    build: ./tls-init
+    volumes:
+      - tls:/tls
+    restart: "no"
+
+  api:
+    build: ../api
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      BANDOLIER_DB_PATH: /var/lib/bandolier/app.db
+      BANDOLIER_VAULT_ADDR: http://vault:8200
+      BANDOLIER_VAULT_APPROLE_PATH: /vault-init-state/approle.json
+      BANDOLIER_TERRAFORM_DIR: /opt/bandolier/terraform
+      BANDOLIER_ANSIBLE_DIR: /opt/bandolier/ansible
+    volumes:
+      - app-data:/var/lib/bandolier
+      - tf-state:/var/lib/bandolier/tf-state
+      - vault-init-state:/vault-init-state:ro
+      - ../terraform:/opt/bandolier/terraform:ro
+      - ../ansible:/opt/bandolier/ansible:ro
+    networks:
+      - bandolier
+    restart: unless-stopped
+
+  ui:
+    build: ../ui
+    depends_on:
+      - api
+      - tls-init
+    ports:
+      - "127.0.0.1:443:443"
+    volumes:
+      - tls:/etc/nginx/tls:ro
+    networks:
+      - bandolier
+    restart: unless-stopped
+
+volumes:
+  vault-data:
+  vault-init-state:
+  app-data:
+  tf-state:
+  tls:
+
+networks:
+  bandolier:
+    driver: bridge
