@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import { LogStream } from './LogStream';
+import type { DeploymentEvent } from '@/lib/ws';
 
 describe('LogStream', () => {
   it('shows stdout text', () => {
     render(<LogStream events={[
-      { type: 'log', stream: 'stdout', text: 'hello world', ts: '2026-05-01T00:00:00Z' } as any,
+      { type: 'log', stream: 'stdout', text: 'hello world', ts: '2026-05-01T00:00:00Z' } as DeploymentEvent,
     ]} />);
     expect(screen.getByText(/hello world/)).toBeInTheDocument();
   });
@@ -16,7 +17,7 @@ describe('LogStream', () => {
         type: 'log', stream: 'stdout',
         text: '\x1b[31mred\x1b[0m plain \x1b[32mgreen\x1b[0m',
         ts: '2026-05-01T00:00:00Z',
-      } as any,
+      } as DeploymentEvent,
     ]} />);
     const red = screen.getByText('red');
     expect(red).toHaveClass('ansi-red');

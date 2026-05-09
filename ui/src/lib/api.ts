@@ -1,15 +1,27 @@
 export class ApiError extends Error {
   status: number
-  body: any
+  body: unknown
 
-  constructor(status: number, body: any) {
+  constructor(status: number, body: unknown) {
     super(`API ${status}: ${JSON.stringify(body)}`)
     this.status = status
     this.body = body
   }
 }
 
-export async function api<T = any>(method: string, path: string, body?: any): Promise<T> {
+// errMessage extracts a user-facing message from a thrown error. Bandolier's
+// API returns JSON errors as `{ error: string }`, so prefer that when present;
+// fall back to the Error.message, then to the supplied default.
+export function errMessage(e: unknown, fallback = 'unknown'): string {
+  if (e instanceof ApiError) {
+    const body = e.body as { error?: string } | null
+    return body?.error ?? e.message
+  }
+  if (e instanceof Error) return e.message
+  return fallback
+}
+
+export async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     credentials: 'include',

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { AlertTriangle, ExternalLink, Trash2 } from 'lucide-react';
-import { listReleases, listInstalls, uninstallApp } from '@/lib/api';
+import { listReleases, listInstalls, uninstallApp , errMessage } from '@/lib/api';
 import { useToasts } from '@/store/toasts';
 
 const SYSTEM_RELEASES = new Set(['traefik']);
@@ -15,7 +15,7 @@ const SYSTEM_RELEASES = new Set(['traefik']);
 // pure hostname.
 function safeHostHref(host: string): string | null {
   if (!host) return null;
-  if (/[\/?#@\\\s]/.test(host)) return null;
+  if (/[/?#@\\\s]/.test(host)) return null;
   try {
     const u = new URL('https://' + host);
     return u.hostname === host ? `https://${host}` : null;
@@ -24,7 +24,7 @@ function safeHostHref(host: string): string | null {
   }
 }
 
-export function InstalledTab({ clusterId, clusterFqdn: _clusterFqdn }: { clusterId: string; clusterFqdn: string }) {
+export function InstalledTab({ clusterId }: { clusterId: string; clusterFqdn: string }) {
   const qc = useQueryClient();
   const nav = useNavigate();
   const push = useToasts((s) => s.push);
@@ -53,9 +53,9 @@ export function InstalledTab({ clusterId, clusterFqdn: _clusterFqdn }: { cluster
       qc.invalidateQueries({ queryKey: ['installs', clusterId] });
       nav({ to: '/apps/installs/$installId', params: { installId: d.install_id } });
     },
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error', title: 'uninstall failed',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
 

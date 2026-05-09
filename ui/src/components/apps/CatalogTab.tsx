@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Shield, Box, Database, Activity, Globe } from 'lucide-react';
+import { Search, Shield, Box, Database, Activity, Globe, type LucideIcon } from 'lucide-react';
 import { listCatalog, listReleases, type CatalogEntry } from '@/lib/api';
 import { InstallModal } from './InstallModal';
 import { InstallBundleModal } from './InstallBundleModal';
 
-const iconMap: Record<string, any> = { shield: Shield, box: Box, database: Database, activity: Activity, globe: Globe };
+const iconMap: Record<string, LucideIcon> = { shield: Shield, box: Box, database: Database, activity: Activity, globe: Globe };
 
 export function CatalogTab({ clusterId, clusterFqdn }: { clusterId: string; clusterFqdn: string }) {
   const catalogQ = useQuery({ queryKey: ['catalog', clusterId], queryFn: () => listCatalog(clusterId), refetchInterval: 60_000 });

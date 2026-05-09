@@ -18,7 +18,7 @@ function Shell() {
     queryKey: ['clusters'],
     queryFn: listClusters,
     enabled: !isAuthRoute,
-    retry: (failureCount, err: any) => {
+    retry: (failureCount, err: unknown) => {
       if (err instanceof ApiError && err.status === 401) return false;
       return failureCount < 1;
     },

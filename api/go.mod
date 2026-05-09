@@ -3,12 +3,13 @@ module github.com/lazerdude-labs/bandolier/api
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/hashicorp/vault/api v1.23.0
 	golang.org/x/crypto v0.50.0
+	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.50.0
-	nhooyr.io/websocket v1.8.17
 )
 
 require (
@@ -36,7 +37,6 @@ require (
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/zclconf/go-cty v1.18.1 // indirect
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/time v0.12.0 // indirect

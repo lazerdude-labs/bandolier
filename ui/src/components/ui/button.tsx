@@ -1,3 +1,8 @@
+/* eslint-disable react-refresh/only-export-components */
+// Vendored shadcn/ui primitive — co-locating the cva variant config alongside
+// the component is the upstream pattern. Splitting it would diverge from
+// every other shadcn install and break recipe-based updates.
+
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 

@@ -52,7 +52,7 @@ func (p ProxmoxProbe) GetVMs(ctx context.Context, creds ProxmoxCreds) ([]Proxmox
 	if err != nil {
 		return nil, fmt.Errorf("proxmox get: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("proxmox status %d: %s", res.StatusCode, string(body))

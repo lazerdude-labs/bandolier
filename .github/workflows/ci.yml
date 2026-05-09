@@ -31,12 +31,6 @@ jobs:
   lint-go:
     name: lint:go
     runs-on: ubuntu-latest
-    # `go vet` is enforced. golangci-lint is best-effort while we burn down
-    # pre-existing errcheck debt (unchecked Close/Fprintf/Remove returns)
-    # accumulated during rapid early development. Mirrors the allow_failure
-    # posture this job carried on the prior GitLab pipeline. Track in a
-    # follow-up issue.
-    continue-on-error: true
     defaults:
       run:
         working-directory: api
@@ -73,11 +67,6 @@ jobs:
   lint-ui:
     name: lint:ui
     runs-on: ubuntu-latest
-    # Best-effort while we burn down pre-existing @typescript-eslint/no-explicit-any
-    # debt accumulated from rapid early development. Build + typecheck are
-    # enforced; the eslint pass is informational until the explicit-any debt
-    # is addressed. Track in a follow-up issue.
-    continue-on-error: true
     defaults:
       run:
         working-directory: ui

@@ -32,7 +32,7 @@ func (KubeProbe) GetNodes(ctx context.Context, kubeconfigYAML string) ([]NodeTel
 	if err != nil {
 		return nil, fmt.Errorf("temp dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	kc := filepath.Join(dir, "kubeconfig")
 	if err := os.WriteFile(kc, []byte(kubeconfigYAML), 0o600); err != nil {

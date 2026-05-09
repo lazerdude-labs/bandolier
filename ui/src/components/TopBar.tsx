@@ -39,7 +39,7 @@ export function TopBar({ clusters, currentClusterId, profiles, onLogout }: Props
           onClick={() =>
             activeClusterId &&
             // T30 will register this route; cast avoids literal route type-check
-            (nav as any)({
+            (nav as (opts: unknown) => void)({
               to: '/clusters/$clusterId/deployments',
               params: { clusterId: activeClusterId },
             })

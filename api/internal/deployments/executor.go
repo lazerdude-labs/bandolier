@@ -123,7 +123,7 @@ func (e *Executor) Deploy(ctx context.Context, clusterID string) (string, error)
 }
 
 func (e *Executor) run(ctx context.Context, depID, clusterID string, prof profiles.Profile, logFile *os.File, actorID int64) {
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	defer e.deregister(depID)
 	defer e.Mutex.Unlock(clusterID)
 
@@ -222,7 +222,7 @@ func (e *Executor) run(ctx context.Context, depID, clusterID string, prof profil
 		fail("create ansible run dir: " + err.Error())
 		return
 	}
-	defer os.RemoveAll(runDir)
+	defer func() { _ = os.RemoveAll(runDir) }()
 	inv, err := prof.BuildInventory(ctx, clusterID, tfOutMap, runDir, e.Vault)
 	if err != nil {
 		stepEnd("ansible", 1)
@@ -371,7 +371,7 @@ func (e *Executor) Destroy(ctx context.Context, clusterID string) (string, error
 }
 
 func (e *Executor) runDestroy(ctx context.Context, depID, clusterID string, prof profiles.Profile, logFile *os.File, actorID int64) {
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	defer e.deregister(depID)
 	defer e.Mutex.Unlock(clusterID)
 
@@ -440,7 +440,7 @@ func (e *Executor) runDestroy(ctx context.Context, depID, clusterID string, prof
 	// 3. Post-destroy hook — Vault cleanup. Failure is warn-only: infrastructure
 	// is gone which is the user-visible meaning of "destroyed". Log it and continue.
 	if err := prof.PostDestroy(ctx, clusterID, e.Vault); err != nil {
-		fmt.Fprintf(&logWriter, "post-destroy warning: %s\n", err.Error())
+		_, _ = fmt.Fprintf(&logWriter, "post-destroy warning: %s\n", err.Error())
 	}
 
 	// 4. Done
@@ -542,13 +542,13 @@ func installTraefik(ctx context.Context, factory apps.HelmFactory, v *vault.Clie
 			return fmt.Errorf("temp values: %w", err)
 		}
 		if _, err := f.WriteString(req.Values); err != nil {
-			f.Close()
-			os.Remove(f.Name())
+			_ = f.Close()
+			_ = os.Remove(f.Name())
 			return fmt.Errorf("write values: %w", err)
 		}
-		f.Close()
+		_ = f.Close()
 		valuesPath = f.Name()
-		defer os.Remove(valuesPath)
+		defer func() { _ = os.Remove(valuesPath) }()
 	}
 	return helm.Install(ctx, req, valuesPath, stdout, stderr)
 }

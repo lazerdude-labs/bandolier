@@ -397,7 +397,7 @@ function NetworkStep() {
         <label className="field-label">DNS servers</label>
         <input className="input mono" placeholder="192.0.2.5, 1.1.1.1" {...register('network.dns.0')} />
         <span className="field-hint">Comma-separated.</span>
-        {err?.dns ? <span className="field-error">{String((err.dns as any)?.message ?? (err.dns as any)?.[0]?.message)}</span> : null}
+        {err?.dns ? <span className="field-error">{String((err.dns as { message?: string })?.message ?? (err.dns as Array<{ message?: string }>)?.[0]?.message)}</span> : null}
       </div>
       <div className="form-grid">
         <div className="field">

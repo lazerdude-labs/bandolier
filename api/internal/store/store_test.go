@@ -15,7 +15,7 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var version int
 	if err := s.DB().QueryRowContext(context.Background(),

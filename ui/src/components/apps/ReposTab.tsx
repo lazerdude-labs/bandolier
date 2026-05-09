@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
-import { listRepos, addRepo, removeRepo } from '@/lib/api';
+import { listRepos, addRepo, removeRepo , errMessage } from '@/lib/api';
 import { useToasts } from '@/store/toasts';
 
 export function ReposTab({ clusterId }: { clusterId: string }) {
@@ -20,9 +20,9 @@ export function ReposTab({ clusterId }: { clusterId: string }) {
       qc.invalidateQueries({ queryKey: ['repos', clusterId] });
       qc.invalidateQueries({ queryKey: ['catalog', clusterId] });
     },
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error', title: 'add repo failed',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
 

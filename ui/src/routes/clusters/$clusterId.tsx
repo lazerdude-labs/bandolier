@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Server, Rocket, ArrowUpCircle, Trash2, Download, Box, RefreshCw, ChevronRight } from 'lucide-react';
-import { getCluster, destroyCluster, listClusterDeployments, listProfiles, listNodes, retrieveKubeconfig, upgradeCluster, getJoinToken, retrieveJoinToken, api, type Deployment } from '@/lib/api';
+import { getCluster, destroyCluster, listClusterDeployments, listProfiles, listNodes, retrieveKubeconfig, upgradeCluster, getJoinToken, retrieveJoinToken, api, type Deployment , errMessage } from '@/lib/api';
 import { StatusBadge, type ClusterStatus } from '@/components/StatusBadge';
 import { ActionBar, type Action } from '@/components/ActionRail';
 import { NodeTable } from '@/components/NodeTable';
@@ -67,8 +67,8 @@ export function ClusterOverview() {
       qc.invalidateQueries({ queryKey: ['clusters'] });
       nav({ to: '/deployments/$deploymentId', params: { deploymentId: d.deployment_id } });
     },
-    onError: (err: any) =>
-      push({ kind: 'error', title: 'Deploy failed to start', body: err?.body?.error ?? err?.message ?? 'unknown' }),
+    onError: (err: unknown) =>
+      push({ kind: 'error', title: 'Deploy failed to start', body: errMessage(err, 'unknown') }),
   });
   const destroy = useMutation({
     mutationFn: () => destroyCluster(clusterId),
@@ -76,8 +76,8 @@ export function ClusterOverview() {
       qc.invalidateQueries({ queryKey: ['clusters'] });
       nav({ to: '/deployments/$deploymentId', params: { deploymentId: d.deployment_id } });
     },
-    onError: (err: any) =>
-      push({ kind: 'error', title: 'Destroy failed to start', body: err?.body?.error ?? err?.message ?? 'unknown' }),
+    onError: (err: unknown) =>
+      push({ kind: 'error', title: 'Destroy failed to start', body: errMessage(err, 'unknown') }),
   });
   const upgradeMut = useMutation({
     mutationFn: (k3sVersion: string) => upgradeCluster(clusterId, k3sVersion),
@@ -86,10 +86,10 @@ export function ClusterOverview() {
       qc.invalidateQueries({ queryKey: ['clusters'] });
       nav({ to: '/deployments/$deploymentId', params: { deploymentId: d.deployment_id } });
     },
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error',
       title: 'Upgrade failed to start',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
   const retrieveMut = useMutation({
@@ -98,10 +98,10 @@ export function ClusterOverview() {
       push({ kind: 'success', title: 'kubeconfig retrieved' });
       qc.invalidateQueries({ queryKey: ['clusters', clusterId] });
     },
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error',
       title: 'Could not retrieve kubeconfig',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
   const joinTokenQ = useQuery({
@@ -115,10 +115,10 @@ export function ClusterOverview() {
       push({ kind: 'success', title: 'join token retrieved' });
       qc.invalidateQueries({ queryKey: ['joinToken', clusterId] });
     },
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error',
       title: 'Could not retrieve join token',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
 
@@ -235,8 +235,8 @@ export function ClusterOverview() {
             <div className="card-header">
               <span className="card-title">Recent deployments</span>
               <Link
-                to={'/clusters/$clusterId/deployments' as any}
-                params={{ clusterId } as any}
+                to={'/clusters/$clusterId/deployments' as never}
+                params={{ clusterId } as never}
                 className="text-[12px] text-muted-foreground hover:text-foreground"
               >View all →</Link>
             </div>

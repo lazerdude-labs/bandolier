@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/go-chi/chi/v5"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 
 	"github.com/lazerdude-labs/bandolier/api/internal/store"
 )
@@ -87,7 +87,7 @@ func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close(websocket.StatusInternalError, "")
+	defer func() { _ = conn.Close(websocket.StatusInternalError, "") }()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 24*time.Hour)
 	defer cancel()

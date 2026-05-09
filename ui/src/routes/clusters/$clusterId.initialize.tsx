@@ -1,6 +1,6 @@
 import { useNavigate, useParams, Link } from '@tanstack/react-router';
 import { useMutation } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api , errMessage } from '@/lib/api';
 import { InitializeForm } from '@/components/InitializeForm';
 import type { InitializeInput } from '@/schemas/initialize';
 import { useToasts } from '@/store/toasts';
@@ -12,7 +12,7 @@ export function ClusterInitialize() {
   const mut = useMutation({
     mutationFn: (v: InitializeInput) => api('POST', `/api/clusters/${clusterId}/initialize`, v),
     onSuccess: () => { push({ kind: 'success', title: 'Cluster initialized', body: 'Vault paths written. You can deploy now.' }); nav({ to: '/clusters/$clusterId', params: { clusterId } }); },
-    onError: (err: any) => push({ kind: 'error', title: 'Initialize failed', body: err?.body?.error ?? err?.message ?? 'unknown' }),
+    onError: (err: unknown) => push({ kind: 'error', title: 'Initialize failed', body: errMessage(err, 'unknown') }),
   });
   return (
     <div className="space-y-4">

@@ -53,7 +53,7 @@ func (b *Bind) runScript(ctx context.Context, script string) error {
 			return fmt.Errorf("temp key: %w", err)
 		}
 		keyFile := kf.Name()
-		defer os.Remove(keyFile)
+		defer func() { _ = os.Remove(keyFile) }()
 		// BIND key file format:
 		//   key "<name>" {
 		//       algorithm hmac-sha256;
@@ -61,14 +61,14 @@ func (b *Bind) runScript(ctx context.Context, script string) error {
 		//   };
 		keyBody := fmt.Sprintf("key \"%s\" {\n\talgorithm hmac-sha256;\n\tsecret \"%s\";\n};\n", b.cfg.TSIGName, b.cfg.TSIGSecret)
 		if _, err := kf.WriteString(keyBody); err != nil {
-			kf.Close()
+			_ = kf.Close()
 			return fmt.Errorf("write key: %w", err)
 		}
 		if err := kf.Chmod(0o600); err != nil {
-			kf.Close()
+			_ = kf.Close()
 			return fmt.Errorf("chmod key: %w", err)
 		}
-		kf.Close()
+		_ = kf.Close()
 		args = append(args, "-k", keyFile)
 	}
 	// Hard timeout — nsupdate can hang waiting for a response.

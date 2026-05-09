@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { installBundle, type CatalogEntry, type BundleChartChoice } from '@/lib/api';
+import { installBundle, type CatalogEntry, type BundleChartChoice , errMessage } from '@/lib/api';
 import { useToasts } from '@/store/toasts';
 
 function substituteHostname(template: string, release: string, fqdn: string): string {
@@ -46,9 +46,9 @@ export function InstallBundleModal({
       onClose();
       nav({ to: '/apps/installs/$installId', params: { installId: d.install_id } });
     },
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error', title: 'bundle install failed to start',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
 
