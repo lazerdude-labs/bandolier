@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `SECURITY.md` documenting the vulnerability disclosure process, supported versions, and what is in and out of scope for security reports.
+- Issue templates for bug reports and feature requests (forms-style), plus a `config.yml` that disables blank issues and links to security advisories and discussions.
+- Pull request template with type-of-change checkboxes, test plan, and a no-secrets-in-diff reminder.
+
 ## [0.1.0] — 2026-05-07
 
 Initial public release.
