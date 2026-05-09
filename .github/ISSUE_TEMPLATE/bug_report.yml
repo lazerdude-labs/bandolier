@@ -1,0 +1,66 @@
+name: Bug report
+description: Something is broken — Bandolier is misbehaving in a reproducible way.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report. **Do not include vault unseal keys, AppRole credentials, or Proxmox API tokens** in this issue. If the bug involves a secret, file under [Security Advisories](https://github.com/lazerdude-labs/bandolier/security/advisories) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of what went wrong.
+      placeholder: "Cluster initialize failed with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: "I expected the cluster to enter the deploying state..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Smallest steps that exhibit the bug. From a clean stack (`docker compose down -v && ./deploy/scripts/smoke.sh`) ideally.
+      placeholder: |
+        1. Run `./deploy/scripts/smoke.sh`
+        2. Open the UI
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Bandolier version
+      description: Output of `git describe` or the image tag from settings.
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: proxmox-version
+    attributes:
+      label: Proxmox version
+      description: Only required for deployment-path bugs.
+      placeholder: "8.4.x"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste container logs (`docker logs deploy-api-1`, `docker logs deploy-vault-agent-1`) and the deployment log if applicable. Redact any tokens or secrets.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Anything else.

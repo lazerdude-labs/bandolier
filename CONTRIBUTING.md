@@ -11,7 +11,7 @@ Open an issue on GitHub. Useful information to include:
 - Your Proxmox version + the cloud image you tried to deploy.
 - Whether you can reproduce on a clean stack (`docker compose down -v && ./deploy/scripts/smoke.sh`).
 
-For security issues, **don't open a public issue**. See [SECURITY.md](SECURITY.md) — coming soon — or email `security@lazerdude-labs.example` if it's not yet there.
+For security issues, **don't open a public issue**. See [SECURITY.md](SECURITY.md) for the disclosure process.
 
 ## Pull requests
 
@@ -54,4 +54,4 @@ The dev server proxies `/api` to the local Compose stack — see `vite.config.ts
 
 ## Reporting a security issue
 
-Please do not file public issues for vulnerabilities. Email security details privately. We'll acknowledge within 72 hours and coordinate disclosure.
+See [SECURITY.md](SECURITY.md). Do not file public issues for vulnerabilities.
