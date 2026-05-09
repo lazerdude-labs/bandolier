@@ -11,11 +11,17 @@ export class ApiError extends Error {
 
 // errMessage extracts a user-facing message from a thrown error. Bandolier's
 // API returns JSON errors as `{ error: string }`, so prefer that when present;
-// fall back to the Error.message, then to the supplied default.
+// fall back to the Error.message, then to the supplied default. The body shape
+// is checked at runtime (not just type-asserted) so a future backend route that
+// deviates — returns an array, a string, or a nested object — falls cleanly
+// through to e.message instead of rendering "[object Object]" in the toast.
 export function errMessage(e: unknown, fallback = 'unknown'): string {
   if (e instanceof ApiError) {
-    const body = e.body as { error?: string } | null
-    return body?.error ?? e.message
+    if (e.body !== null && typeof e.body === 'object' && !Array.isArray(e.body)) {
+      const err = (e.body as Record<string, unknown>).error
+      if (typeof err === 'string') return err
+    }
+    return e.message
   }
   if (e instanceof Error) return e.message
   return fallback
