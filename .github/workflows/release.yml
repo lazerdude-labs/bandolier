@@ -48,13 +48,18 @@ jobs:
           # Three tags per image:
           #   {{version}}            -> 0.1.0   (full semver)
           #   {{major}}.{{minor}}    -> 0.1     (floating minor pin)
-          #   latest                 -> latest  (always points at the most recent release)
+          #   latest                           (only for stable semver, see flavor)
           # Operators pin to {{version}} for reproducibility, {{major}}.{{minor}}
           # for "latest patch in this line", or latest for "always newest".
+          # `flavor: latest=true` opts into metadata-action's native handling:
+          # the latest tag is set only for non-prerelease semver tags. If we
+          # ever broaden the trigger to include `v0.1.0-rc1`-style pre-releases,
+          # those won't overwrite latest.
+          flavor: |
+            latest=true
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
           labels: |
             org.opencontainers.image.source=https://github.com/lazerdude-labs/bandolier
             org.opencontainers.image.licenses=MIT
