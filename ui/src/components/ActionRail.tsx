@@ -39,8 +39,8 @@ export function ActionBar({ actions }: { actions: Action[] }) {
         ) : a.href ? (
           <Link
             key={a.key}
-            to={a.href.to as any}
-            params={a.href.params as any}
+            to={a.href.to as never}
+            params={a.href.params as never}
             className={cls}
           >{a.icon}{a.label}</Link>
         ) : (

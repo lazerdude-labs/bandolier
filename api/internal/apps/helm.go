@@ -128,11 +128,7 @@ func parseListJSON(b []byte) ([]Release, error) {
 	}
 	out := make([]Release, 0, len(raw))
 	for _, r := range raw {
-		out = append(out, Release{
-			Name: r.Name, Namespace: r.Namespace, Chart: r.Chart,
-			AppVersion: r.AppVersion, Revision: r.Revision,
-			Status: r.Status, Updated: r.Updated,
-		})
+		out = append(out, Release(r))
 	}
 	return out, nil
 }

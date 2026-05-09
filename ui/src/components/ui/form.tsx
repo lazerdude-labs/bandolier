@@ -1,3 +1,7 @@
+/* eslint-disable react-refresh/only-export-components */
+// Vendored shadcn/ui primitive — co-locating the FormField context hook
+// alongside the components is the upstream pattern.
+
 "use client"
 
 import * as React from "react"

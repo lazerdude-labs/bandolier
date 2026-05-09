@@ -91,7 +91,7 @@ func (e *Executor) runBundleInstall(
 	logFile *os.File,
 	actorID int64,
 ) {
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	defer e.deregister(id)
 	defer e.Mutex.Unlock(clusterID)
 
@@ -143,7 +143,7 @@ func (e *Executor) runBundleInstall(
 
 	helm, cleanup, err := e.Helm.For(ctx, clusterID)
 	if err != nil {
-		fmt.Fprintf(tee, "helm factory error: %s\n", err.Error())
+		_, _ = fmt.Fprintf(tee, "helm factory error: %s\n", err.Error())
 		finish(false, fmt.Sprintf("helm unavailable: %s", err.Error()))
 		return
 	}
@@ -158,7 +158,7 @@ func (e *Executor) runBundleInstall(
 
 	for i, choice := range req.Choices {
 		if choice.Skip {
-			fmt.Fprintf(tee, "bundle: skip %s (release=%s)\n", choice.Chart, choice.Release)
+			_, _ = fmt.Fprintf(tee, "bundle: skip %s (release=%s)\n", choice.Chart, choice.Release)
 			continue
 		}
 
@@ -167,7 +167,7 @@ func (e *Executor) runBundleInstall(
 		// downstream) and audit details show the resolved value.
 		choice.Hostname = substituteHostnameTemplate(choice.Hostname, choice.Release, fqdn)
 
-		fmt.Fprintf(tee, "bundle: install %s (release=%s, ns=%s)\n",
+		_, _ = fmt.Fprintf(tee, "bundle: install %s (release=%s, ns=%s)\n",
 			choice.Chart, choice.Release, choice.Namespace)
 
 		// Re-add the chart's source repo before install. Same dance as the
@@ -175,7 +175,7 @@ func (e *Executor) runBundleInstall(
 		if repoName, ok := splitChartRepo(choice.Chart); ok {
 			if repoURL := e.lookupRepoURL(ctx, clusterID, repoName); repoURL != "" {
 				if err := helm.RepoAdd(ctx, repoName, repoURL); err != nil {
-					fmt.Fprintf(tee, "helm repo add %s: %s\n", repoName, err.Error())
+					_, _ = fmt.Fprintf(tee, "helm repo add %s: %s\n", repoName, err.Error())
 				}
 				_ = helm.RepoUpdate(ctx)
 			}
@@ -188,7 +188,7 @@ func (e *Executor) runBundleInstall(
 		if choice.Values != "" {
 			vp := filepath.Join(e.LogRoot, fmt.Sprintf("%s.bundle-%d.values.yaml", id, i))
 			if err := os.WriteFile(vp, []byte(choice.Values), 0o600); err != nil {
-				fmt.Fprintf(tee, "write values file: %s\n", err.Error())
+				_, _ = fmt.Fprintf(tee, "write values file: %s\n", err.Error())
 				outcomes[i].Outcome = "failed"
 				rollbackInstalled(ctx, helm, installed, tee)
 				markRolledBack(outcomes, installed)
@@ -214,7 +214,7 @@ func (e *Executor) runBundleInstall(
 		}
 
 		if opErr != nil {
-			fmt.Fprintf(tee, "bundle: chart %s failed: %s\n", choice.Chart, opErr.Error())
+			_, _ = fmt.Fprintf(tee, "bundle: chart %s failed: %s\n", choice.Chart, opErr.Error())
 			outcomes[i].Outcome = "failed"
 			rollbackInstalled(ctx, helm, installed, tee)
 			markRolledBack(outcomes, installed)
@@ -247,12 +247,12 @@ func rollbackInstalled(ctx context.Context, helm Helm, installed []BundleChartCh
 	if len(installed) == 0 {
 		return
 	}
-	fmt.Fprintf(tee, "bundle: rolling back %d previously-installed chart(s) in reverse order\n", len(installed))
+	_, _ = fmt.Fprintf(tee, "bundle: rolling back %d previously-installed chart(s) in reverse order\n", len(installed))
 	for i := len(installed) - 1; i >= 0; i-- {
 		c := installed[i]
-		fmt.Fprintf(tee, "bundle: rollback uninstall %s (release=%s, ns=%s)\n", c.Chart, c.Release, c.Namespace)
+		_, _ = fmt.Fprintf(tee, "bundle: rollback uninstall %s (release=%s, ns=%s)\n", c.Chart, c.Release, c.Namespace)
 		if err := helm.Uninstall(ctx, c.Release, c.Namespace, tee, tee); err != nil {
-			fmt.Fprintf(tee, "bundle: rollback uninstall %s failed: %s (continuing)\n", c.Release, err.Error())
+			_, _ = fmt.Fprintf(tee, "bundle: rollback uninstall %s failed: %s (continuing)\n", c.Release, err.Error())
 		}
 	}
 }

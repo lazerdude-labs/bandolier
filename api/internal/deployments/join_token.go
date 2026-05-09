@@ -82,7 +82,7 @@ func (e *Executor) RetrieveJoinToken(ctx context.Context, clusterID string) erro
 	if err != nil {
 		return fmt.Errorf("temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 	keyPath := filepath.Join(tmpDir, "ssh_key")
 	if err := os.WriteFile(keyPath, []byte(privateKey), 0o600); err != nil {
 		return fmt.Errorf("write ssh key: %w", err)

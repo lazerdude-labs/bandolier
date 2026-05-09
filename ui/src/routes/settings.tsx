@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Link } from '@tanstack/react-router';
 import { ShieldCheck, Lock, Archive, Box, Download, UploadCloud, Key, RefreshCw, Settings, Activity as ActivityIcon } from 'lucide-react';
 import { changePasswordSchema, type ChangePasswordInput } from '@/schemas/password';
-import { changePassword, getHealth, listAuditLog } from '@/lib/api';
+import { changePassword, getHealth, listAuditLog , errMessage } from '@/lib/api';
 import { useToasts } from '@/store/toasts';
 import { AuditTable } from '@/components/AuditTable';
 
@@ -16,7 +16,7 @@ export function SettingsRoute() {
   const mut = useMutation({
     mutationFn: (v: ChangePasswordInput) => changePassword(v.current_password, v.new_password),
     onSuccess: () => { push({ kind: 'success', title: 'Password changed' }); form.reset(); },
-    onError: (err: any) => push({ kind: 'error', title: 'Could not change password', body: err?.body?.error ?? err?.message ?? 'unknown' }),
+    onError: (err: unknown) => push({ kind: 'error', title: 'Could not change password', body: errMessage(err, 'unknown') }),
   });
 
   const v = health.data?.vault ?? null;

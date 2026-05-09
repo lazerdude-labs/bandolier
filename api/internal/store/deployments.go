@@ -89,7 +89,7 @@ func (s *Store) ListDeploymentsForCluster(ctx context.Context, clusterID string,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]Deployment, 0)
 	for rows.Next() {
 		var d Deployment
@@ -115,7 +115,7 @@ func (s *Store) ListRunningDeployments(ctx context.Context) ([]Deployment, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]Deployment, 0)
 	for rows.Next() {
 		var d Deployment

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, Link } from '@tanstack/react-router';
 import { Shield, Flag, Eye, AlertTriangle, ArrowRight, type LucideIcon } from 'lucide-react';
-import { listProfiles, api, type ProfileMeta } from '@/lib/api';
+import { listProfiles, api, type ProfileMeta , errMessage } from '@/lib/api';
 import { useToasts } from '@/store/toasts';
 import { newClusterSchema } from '@/schemas/profile';
 import { IconBadge } from '@/components/IconBadge';
@@ -29,8 +29,8 @@ export function ClustersNew() {
         window.location.href = `/clusters/${cluster.id}/initialize`;
       }
     },
-    onError: (err: any) =>
-      push({ kind: 'error', title: 'Could not create cluster', body: err?.body?.error ?? err?.message ?? 'unknown' }),
+    onError: (err: unknown) =>
+      push({ kind: 'error', title: 'Could not create cluster', body: errMessage(err, 'unknown') }),
   });
 
   const onSubmit = (e: React.FormEvent) => {

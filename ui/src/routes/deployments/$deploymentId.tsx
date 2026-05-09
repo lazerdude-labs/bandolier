@@ -2,7 +2,7 @@ import { useParams, Link, useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { ArrowLeft, History } from 'lucide-react';
 import { useDeploymentLogs } from '@/lib/ws';
-import { getDeployment, cancelDeployment, deployCluster } from '@/lib/api';
+import { getDeployment, cancelDeployment, deployCluster , errMessage } from '@/lib/api';
 import { StepList } from '@/components/StepList';
 import { LogStream } from '@/components/LogStream';
 import { DeployBanner } from '@/components/DeployBanner';
@@ -52,17 +52,17 @@ export function DeploymentLogs() {
   const push = useToasts((s) => s.push);
   const cancelMut = useMutation({
     mutationFn: () => cancelDeployment(deploymentId),
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error', title: 'Cancel failed',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
   const retryMut = useMutation({
     mutationFn: () => deployCluster(d!.cluster_id),
     onSuccess: (resp) => nav({ to: '/deployments/$deploymentId', params: { deploymentId: resp.deployment_id } }),
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error', title: 'Retry failed',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
 
@@ -89,8 +89,8 @@ export function DeploymentLogs() {
           <div className="flex items-center gap-2">
             {d?.cluster_id ? (
               <Link
-                to={'/clusters/$clusterId/deployments' as any}
-                params={{ clusterId: d.cluster_id } as any}
+                to={'/clusters/$clusterId/deployments' as never}
+                params={{ clusterId: d.cluster_id } as never}
                 className="btn btn-outline btn-sm"
               >
                 <History size={12} />History

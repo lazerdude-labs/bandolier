@@ -38,7 +38,7 @@ func (a *Store) ListRepos(ctx context.Context, clusterID string) ([]Repo, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Repo
 	for rows.Next() {
 		var r Repo
@@ -131,7 +131,7 @@ func (a *Store) ListInstallsForCluster(ctx context.Context, clusterID string, li
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Install
 	for rows.Next() {
 		var in Install

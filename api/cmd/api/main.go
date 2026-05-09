@@ -46,7 +46,7 @@ func main() {
 		logger.Error("store open", "err", err)
 		os.Exit(1)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	addr := os.Getenv("BANDOLIER_VAULT_ADDR")
 	if addr == "" {

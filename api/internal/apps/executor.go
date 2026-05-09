@@ -274,7 +274,7 @@ func (e *Executor) runInstallOrUpgrade(
 	logFile *os.File,
 	actorID int64,
 ) {
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	defer e.deregister(id)
 	defer e.Mutex.Unlock(clusterID)
 
@@ -315,7 +315,7 @@ func (e *Executor) runInstallOrUpgrade(
 
 	helm, cleanup, err := e.Helm.For(ctx, clusterID)
 	if err != nil {
-		fmt.Fprintf(tee, "helm factory error: %s\n", err.Error())
+		_, _ = fmt.Fprintf(tee, "helm factory error: %s\n", err.Error())
 		finish(fmt.Errorf("helm unavailable: %w", err))
 		return
 	}
@@ -328,7 +328,7 @@ func (e *Executor) runInstallOrUpgrade(
 	if repoName, ok := splitChartRepo(req.Chart); ok {
 		if repoURL := e.lookupRepoURL(ctx, clusterID, repoName); repoURL != "" {
 			if err := helm.RepoAdd(ctx, repoName, repoURL); err != nil {
-				fmt.Fprintf(tee, "helm repo add %s: %s\n", repoName, err.Error())
+				_, _ = fmt.Fprintf(tee, "helm repo add %s: %s\n", repoName, err.Error())
 			}
 			_ = helm.RepoUpdate(ctx)
 		}
@@ -340,12 +340,12 @@ func (e *Executor) runInstallOrUpgrade(
 	if req.Values != "" {
 		vp := filepath.Join(e.LogRoot, id+".values.yaml")
 		if err := os.WriteFile(vp, []byte(req.Values), 0o600); err != nil {
-			fmt.Fprintf(tee, "write values file: %s\n", err.Error())
+			_, _ = fmt.Fprintf(tee, "write values file: %s\n", err.Error())
 			finish(fmt.Errorf("write values: %w", err))
 			return
 		}
 		valuesPath = vp
-		defer os.Remove(vp)
+		defer func() { _ = os.Remove(vp) }()
 	}
 
 	e.Hub.PublishStepStart(id, "helm."+op)
@@ -366,7 +366,7 @@ func (e *Executor) runInstallOrUpgrade(
 		claimed, perr := probeHostnameClaimed(ctx, helm.KubeconfigFile(), req.Namespace, req.Hostname)
 		if perr == nil && !claimed {
 			_ = e.Apps.MarkHostnameUnclaimed(ctx, id, true)
-			fmt.Fprintf(tee, "warning: hostname %q not claimed by any Ingress or IngressRoute in namespace %q. Chart may use a different value path. Open the install modal's Advanced ▸ Hostname value path to override.\n", req.Hostname, req.Namespace)
+			_, _ = fmt.Fprintf(tee, "warning: hostname %q not claimed by any Ingress or IngressRoute in namespace %q. Chart may use a different value path. Open the install modal's Advanced ▸ Hostname value path to override.\n", req.Hostname, req.Namespace)
 		}
 	}
 
@@ -381,7 +381,7 @@ func (e *Executor) runUninstall(
 	logFile *os.File,
 	actorID int64,
 ) {
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	defer e.deregister(id)
 	defer e.Mutex.Unlock(clusterID)
 
@@ -416,7 +416,7 @@ func (e *Executor) runUninstall(
 
 	helm, cleanup, err := e.Helm.For(ctx, clusterID)
 	if err != nil {
-		fmt.Fprintf(tee, "helm factory error: %s\n", err.Error())
+		_, _ = fmt.Fprintf(tee, "helm factory error: %s\n", err.Error())
 		finish(fmt.Errorf("helm unavailable: %w", err))
 		return
 	}

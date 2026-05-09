@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { installApp, type CatalogEntry } from '@/lib/api';
+import { installApp, type CatalogEntry , errMessage } from '@/lib/api';
 import { useToasts } from '@/store/toasts';
 
 export function InstallModal({
@@ -42,9 +42,9 @@ export function InstallModal({
       onClose();
       nav({ to: '/apps/installs/$installId', params: { installId: d.install_id } });
     },
-    onError: (err: any) => push({
+    onError: (err: unknown) => push({
       kind: 'error', title: 'install failed to start',
-      body: err?.body?.error ?? err?.message ?? 'unknown',
+      body: errMessage(err, 'unknown'),
     }),
   });
 

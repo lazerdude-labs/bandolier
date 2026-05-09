@@ -8,7 +8,7 @@ export interface DeploymentEvent {
   text?: string
   status?: string
   exit_code?: number
-  data?: any
+  data?: unknown
   ts: string
 }
 
@@ -53,7 +53,9 @@ function useReconnectingWS(urlPath: string): LogStreamReturn {
           if (ev.type === 'deployment_complete') {
             terminalRef.current = true
           }
-        } catch {}
+        } catch {
+          // drop malformed event payloads silently — backend always emits valid JSON
+        }
       }
       ws.onclose = (e) => {
         if (wsRef.current === ws) wsRef.current = null

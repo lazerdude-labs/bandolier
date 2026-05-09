@@ -13,7 +13,7 @@ export function Stepper({
     <div className="stepper-vert">
       {steps.map((s, i) => {
         const state = i < currentIndex ? 'done' : i === currentIndex ? 'active' : 'pending';
-        const Comp: any = onJump ? 'button' : 'div';
+        const Comp: 'button' | 'div' = onJump ? 'button' : 'div';
         return (
           <Comp
             key={s.name}

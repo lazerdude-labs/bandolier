@@ -1,15 +1,33 @@
 export class ApiError extends Error {
   status: number
-  body: any
+  body: unknown
 
-  constructor(status: number, body: any) {
+  constructor(status: number, body: unknown) {
     super(`API ${status}: ${JSON.stringify(body)}`)
     this.status = status
     this.body = body
   }
 }
 
-export async function api<T = any>(method: string, path: string, body?: any): Promise<T> {
+// errMessage extracts a user-facing message from a thrown error. Bandolier's
+// API returns JSON errors as `{ error: string }`, so prefer that when present;
+// fall back to the Error.message, then to the supplied default. The body shape
+// is checked at runtime (not just type-asserted) so a future backend route that
+// deviates — returns an array, a string, or a nested object — falls cleanly
+// through to e.message instead of rendering "[object Object]" in the toast.
+export function errMessage(e: unknown, fallback = 'unknown'): string {
+  if (e instanceof ApiError) {
+    if (e.body !== null && typeof e.body === 'object' && !Array.isArray(e.body)) {
+      const err = (e.body as Record<string, unknown>).error
+      if (typeof err === 'string') return err
+    }
+    return e.message
+  }
+  if (e instanceof Error) return e.message
+  return fallback
+}
+
+export async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     credentials: 'include',

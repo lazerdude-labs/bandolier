@@ -19,7 +19,10 @@ export function SetupPage() {
     if (pw !== confirm) { setErr('passwords do not match'); return; }
     if (pw.length < 12) { setErr('password must be at least 12 characters'); return; }
     try { await api('POST', '/api/auth/setup', { password: pw }); nav({ to: '/login' }); }
-    catch (e: any) { setErr(e?.body?.error ?? 'setup failed'); }
+    catch (e: unknown) {
+      const err = e as { body?: { error?: string } };
+      setErr(err?.body?.error ?? 'setup failed');
+    }
   };
 
   return (

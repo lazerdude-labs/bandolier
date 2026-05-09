@@ -63,7 +63,7 @@ func (s *Store) ListAuditEntries(ctx context.Context, f AuditFilter) ([]AuditRow
 	if err != nil {
 		return nil, fmt.Errorf("list audit: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make([]AuditRow, 0, limit)
 	for rows.Next() {

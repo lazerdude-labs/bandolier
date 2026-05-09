@@ -75,7 +75,7 @@ func (e *Executor) Upgrade(ctx context.Context, clusterID, k3sVersion string) (s
 }
 
 func (e *Executor) runUpgrade(ctx context.Context, depID, clusterID, k3sVersion string, prof profiles.Profile, logFile *os.File, actorID int64) {
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	defer e.deregister(depID)
 	defer e.Mutex.Unlock(clusterID)
 
@@ -105,7 +105,7 @@ func (e *Executor) runUpgrade(ctx context.Context, depID, clusterID, k3sVersion 
 		fail("temp dir: " + err.Error())
 		return
 	}
-	defer os.RemoveAll(runDir)
+	defer func() { _ = os.RemoveAll(runDir) }()
 
 	// Homelab BuildInventory ignores tfOutputs and reads the vault network/SSH
 	// secrets directly. Pass nil so we don't need to re-run terraform output.

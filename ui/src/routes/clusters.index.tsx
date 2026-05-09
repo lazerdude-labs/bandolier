@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react';
-import { listClusters, listProfiles, type Cluster } from '@/lib/api';
+import { listClusters, listProfiles, type Cluster, type ProfileMeta } from '@/lib/api';
 import { ProfileCard } from '@/components/ProfileCard';
 import { FilterPills } from '@/components/FilterPills';
 import { StatusBadge, type ClusterStatus } from '@/components/StatusBadge';
@@ -125,7 +125,7 @@ export function ClustersIndex() {
   );
 }
 
-function ClusterRow({ cluster: c, profiles }: { cluster: Cluster; profiles: any[] }) {
+function ClusterRow({ cluster: c, profiles }: { cluster: Cluster; profiles: ProfileMeta[] }) {
   const profile = profiles.find((p) => p.name === c.profile);
   const dot = profile ? accentToHsl[profile.accent] : 'hsl(var(--muted-foreground))';
   return (

@@ -18,8 +18,9 @@ export function LoginPage() {
     try {
       await api('POST', '/api/auth/login', { password });
       nav({ to: '/clusters' });
-    } catch (e: any) {
-      setErr(e?.body?.error ?? 'login failed');
+    } catch (e: unknown) {
+      const err = e as { body?: { error?: string } };
+      setErr(err?.body?.error ?? 'login failed');
     } finally { setLoading(false); }
   };
 
