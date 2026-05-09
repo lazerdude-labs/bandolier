@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -14,6 +16,34 @@ import (
 
 	"github.com/lazerdude-labs/bandolier/api/internal/store"
 )
+
+// wsOriginPatterns parses the BANDOLIER_WS_ORIGIN_PATTERNS env var into the
+// shape coder/websocket's AcceptOptions expects. Empty/unset means the library
+// default applies: the request host is always authorized (strict same-origin),
+// and no extra origins are allowed. That's the safe default for the standard
+// loopback-bound deploy where the UI and API are served from the same host.
+//
+// Set the env var to a comma-separated list of host patterns
+// (e.g. "localhost:5173,*.lab.internal") to allow additional origins —
+// typically only needed when running the UI dev server on a different port,
+// or when intentionally exposing the stack on a LAN with multiple hostnames.
+//
+// Patterns use path.Match semantics (case-insensitive). DO NOT set "*" — that
+// disables origin enforcement entirely; use InsecureSkipVerify (which we never
+// set) if you really need to.
+func wsOriginPatterns() []string {
+	v := os.Getenv("BANDOLIER_WS_ORIGIN_PATTERNS")
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 type Handler struct {
 	Store    *store.Store
@@ -82,7 +112,7 @@ func (h *Handler) ListForCluster(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"}, // Plan 2 tightens this
+		OriginPatterns: wsOriginPatterns(),
 	})
 	if err != nil {
 		return
