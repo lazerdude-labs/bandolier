@@ -48,3 +48,15 @@ func TestWsOriginPatterns_OnlyWhitespaceIsEmpty(t *testing.T) {
 		t.Fatalf("expected nil for whitespace-only env, got %v", got)
 	}
 }
+
+func TestWsOriginPatterns_DropsBareStar(t *testing.T) {
+	// A bare `*` would match every hostname under path.Match and re-enable
+	// the original cross-origin replay vector. Verify it's silently dropped
+	// while legitimate wildcard subdomains pass through unchanged.
+	t.Setenv("BANDOLIER_WS_ORIGIN_PATTERNS", "*,localhost,*.lab.internal,*")
+	got := wsOriginPatterns()
+	want := []string{"localhost", "*.lab.internal"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bare '*' should be dropped: got %v, want %v", got, want)
+	}
+}
