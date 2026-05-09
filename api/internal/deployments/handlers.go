@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -14,6 +18,51 @@ import (
 
 	"github.com/lazerdude-labs/bandolier/api/internal/store"
 )
+
+// wsBareStarWarn ensures the bare-* misconfiguration warning fires at most
+// once per process even though wsOriginPatterns() is called on every WS
+// upgrade.
+var wsBareStarWarn sync.Once
+
+// wsOriginPatterns parses the BANDOLIER_WS_ORIGIN_PATTERNS env var into the
+// shape coder/websocket's AcceptOptions expects. Empty/unset means the library
+// default applies: the request host is always authorized (strict same-origin),
+// and no extra origins are allowed. That's the safe default for the standard
+// loopback-bound deploy where the UI and API are served from the same host.
+//
+// Set the env var to a comma-separated list of host patterns
+// (e.g. "localhost:5173,*.lab.internal") to allow additional origins —
+// typically only needed when running the UI dev server on a different port,
+// or when intentionally exposing the stack on a LAN with multiple hostnames.
+//
+// Patterns use path.Match semantics (case-insensitive). A bare "*" matches
+// every hostname (path.Match's `*` matches any sequence of non-separator
+// characters and hostnames contain no `/`), which would disable origin
+// enforcement and re-open the original CSRF hole. We drop bare-* patterns
+// at parse time and log a one-shot warning so the operator notices.
+// Operators who really want to disable enforcement should patch the source
+// to set InsecureSkipVerify rather than rely on this env var.
+func wsOriginPatterns() []string {
+	v := os.Getenv("BANDOLIER_WS_ORIGIN_PATTERNS")
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		s := strings.TrimSpace(p)
+		if s == "" {
+			continue
+		}
+		if s == "*" {
+			wsBareStarWarn.Do(func() {
+				slog.Warn("BANDOLIER_WS_ORIGIN_PATTERNS contains bare '*'; pattern dropped (would disable origin enforcement)")
+			})
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
 
 type Handler struct {
 	Store    *store.Store
@@ -82,7 +131,7 @@ func (h *Handler) ListForCluster(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Logs(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"}, // Plan 2 tightens this
+		OriginPatterns: wsOriginPatterns(),
 	})
 	if err != nil {
 		return
