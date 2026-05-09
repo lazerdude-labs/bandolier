@@ -13,16 +13,26 @@ Bandolier is in active 0.x development. Only the latest minor release receives s
 
 **Do not file a public issue for a vulnerability.**
 
-Email the maintainer at `security@lazerdude-labs.dev` with the details. We acknowledge receipt within 72 hours and aim to issue a fix within 30 days for high-severity issues.
+Use GitHub's private vulnerability reporting:
+
+➡️ **[github.com/lazerdude-labs/bandolier/security/advisories/new](https://github.com/lazerdude-labs/bandolier/security/advisories/new)**
+
+This is the only supported disclosure channel. Reports go directly to the maintainers in an end-to-end encrypted thread on GitHub, with an audit trail. We use this channel to coordinate triage, fix, and disclosure timing.
 
 When reporting, include:
 
 - What you found and the impact (read access, write access, code execution, etc.).
 - A minimal reproduction (command-line or browser steps that exhibit the issue).
-- The Bandolier version (`git describe` or `docker image inspect ghcr.io/lazerdude-labs/bandolier/api`).
+- The Bandolier version (`git describe`, the GitHub release tag, or the image tag from the Settings page).
 - Whether you've published anything about the issue elsewhere.
 
-We'll respond on the same email thread to coordinate a disclosure timeline.
+## Response timeline
+
+Bandolier is a single-maintainer project. We do our best to respond promptly but cannot offer a binding SLA:
+
+- **Acknowledgement:** within a few business days, typically.
+- **Triage and fix:** depends on severity and complexity. We coordinate the timeline with you in the advisory thread. For most issues, expect weeks rather than days. For critical issues (remote code execution, secret exfiltration), we prioritize and aim for a fix or workaround within a month — but we'll tell you honestly if that's not feasible.
+- **Disclosure:** coordinated. We default to publishing an advisory once a fix is available; reporters can request earlier or later disclosure for legitimate reasons (academic publication, responsible reuse window, etc.).
 
 ## Scope
 
@@ -34,9 +44,9 @@ In scope:
 
 Out of scope:
 
-- Issues that require host-level compromise of the machine running Bandolier. The threat model assumes the operator host is trusted; see `deploy/vault-init/THREAT_MODEL.md` for the explicit boundary.
-- Issues caused by the operator deviating from the documented deployment topology (exposing the UI to the public internet without TLS terminator, running Bandolier on a multi-tenant host, etc.).
-- Issues in upstream dependencies (HashiCorp Vault, Terraform, Ansible, k3s). Report those upstream; we'll pin or work around once notified.
+- Issues that require host-level compromise of the machine running Bandolier. The threat model assumes the operator host is trusted; see [`deploy/vault-init/THREAT_MODEL.md`](deploy/vault-init/THREAT_MODEL.md) for the explicit boundary.
+- Issues caused by the operator deviating from the documented deployment topology (exposing the UI to the public internet without TLS terminator, running Bandolier on a multi-tenant host, etc.). The defaults bind to `127.0.0.1`; reports about behavior under deliberately weakened configuration aren't tracked here.
+- Issues in upstream dependencies (HashiCorp Vault, Terraform, Ansible, k3s, the React stack). Report those upstream; we'll pin or work around once notified.
 
 ## Public disclosure
 
