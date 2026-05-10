@@ -12,8 +12,10 @@ If you've hit something not on this list, please open an issue with the **Bug re
 2. [Snippets storage: enable the `snippets` content type](#snippets-storage-enable-the-snippets-content-type)
 3. [Cloud image download fails with 403](#cloud-image-download-fails-with-403)
 4. [Storage doesn't exist (`local-lvm`, etc.)](#storage-doesnt-exist-local-lvm-etc)
-5. [Working directly with the live cluster workspace](#working-directly-with-the-live-cluster-workspace)
-6. [Lock-file mismatch after a manual edit](#lock-file-mismatch-after-a-manual-edit)
+5. [Vault PKI: `unknown role: traefik` at TLS step](#vault-pki-unknown-role-traefik-at-tls-step)
+6. [Deploy log stream returns 403 from a remote browser](#deploy-log-stream-returns-403-from-a-remote-browser)
+7. [Working directly with the live cluster workspace](#working-directly-with-the-live-cluster-workspace)
+8. [Lock-file mismatch after a manual edit](#lock-file-mismatch-after-a-manual-edit)
 
 ---
 
@@ -144,6 +146,66 @@ cd deploy && docker compose up -d
 Then redeploy. The wizard's **Storage** field (e.g. `vm_data` for Ceph RBD setups) is now respected for both the VM disks and the cloud-init drive.
 
 If you're stuck on an older version and can't upgrade, see the next section for how to patch the live workspace by hand.
+
+---
+
+## Vault PKI: `unknown role: traefik` at TLS step
+
+**Fixed in v0.1.6** — `vault-init/init.sh` now bootstraps the PKI mount with a root CA and the `traefik` role at first run. If you're upgrading from v0.1.5 or earlier and your cluster init failed at the TLS step, just upgrade — the next vault-agent boot will detect the missing CA and generate it.
+
+### Symptoms (v0.1.5 and earlier)
+
+```
+Deployment failed: tls wildcard: vault write pki/issue/traefik:
+  Error making API request. URL: PUT http://vault:8200/v1/pki/issue/traefik
+  Code: 400. Errors: * unknown role: traefik
+```
+
+The cluster's VMs are usually already provisioned in Proxmox at this point — the TLS step runs after terraform apply. The Retry button on the deploy detail page picks up where it left off, so the deploy will complete cleanly once the role exists.
+
+### Manual unblock (only if you can't upgrade)
+
+```bash
+# On the Bandolier host
+ROOT_TOKEN=$(sudo docker exec deploy-vault-agent-1 jq -r .root_token /state/init.json)
+
+# Pass the token via -e VAULT_TOKEN so it's never interpolated by the
+# outer shell (single quotes on the inner sh -c keep $VAULT_TOKEN
+# unexpanded until the inner shell evaluates it).
+sudo docker exec -e VAULT_TOKEN="$ROOT_TOKEN" deploy-vault-agent-1 sh -c '
+  curl -fsS -X POST -H "X-Vault-Token: $VAULT_TOKEN" \
+    "$VAULT_ADDR/v1/pki/root/generate/internal" \
+    -d "{\"common_name\":\"Bandolier Homelab Root CA\",\"ttl\":\"87600h\",\"key_type\":\"rsa\",\"key_bits\":4096}"
+'
+sudo docker exec -e VAULT_TOKEN="$ROOT_TOKEN" deploy-vault-agent-1 sh -c '
+  curl -fsS -X PUT -H "X-Vault-Token: $VAULT_TOKEN" \
+    "$VAULT_ADDR/v1/pki/roles/traefik" \
+    -d "{\"allow_any_name\":true,\"max_ttl\":\"8784h\"}"
+'
+```
+
+Then **Retry** on the failed deploy page.
+
+---
+
+## Deploy log stream returns 403 from a remote browser
+
+**Fixed in v0.1.6** for the common single-hostname case — the ui container's nginx now forwards `Host` correctly on the `/ws/` proxy, so accessing the UI from a remote browser at the same hostname/IP works without configuration. If you still see 403s after upgrading, you're probably reaching the UI from multiple hostnames (FQDN + raw IP, or several LAN names).
+
+### Symptoms
+
+The deploy detail page's log pane shows nothing — `all 0` / `stdout 0` / `stderr 0`. The api log shows repeated `GET /ws/deployments/<id>/logs status:403`.
+
+### Fix (multi-hostname setups, v0.1.6+)
+
+Set `BANDOLIER_WS_ORIGIN_PATTERNS` to a comma-separated list of every hostname you want to allow:
+
+```yaml
+# deploy/docker-compose.yml — under api: environment:
+BANDOLIER_WS_ORIGIN_PATTERNS: "bandolier.lab.internal,10.10.10.50"
+```
+
+Patterns use `path.Match` semantics; `*.lab.internal` matches any subdomain. A bare `*` is dropped at parse time (would re-open CSRF). Apply with `docker compose up -d`.
 
 ---
 

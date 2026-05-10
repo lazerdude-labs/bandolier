@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] — 2026-05-10
+
+Two latent bugs uncovered by the first end-to-end deploy on a clean Vault, post-v0.1.5: every cluster init died at the TLS-wildcard step because Vault PKI was never bootstrapped, and the deploy log stream returned 403 for any operator hitting the UI from a non-loopback host. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.6` (or `:0.1` / `:latest`) to upgrade.
+
+### Fixed
+
+- **Vault PKI is now bootstrapped at first run.** The `vault-agent` container's `init.sh` enables the `pki/` mount but, through v0.1.5, never generated a root CA or created the `traefik` role that the api's `IssueWildcardCert` (api/internal/clusters/cert.go) calls during the TLS-wildcard step of every cluster deploy. Result: every cleanly-initialized Bandolier install died with `Error making API request. URL: PUT http://vault:8200/v1/pki/issue/traefik Code: 400. Errors: * unknown role: traefik` after the VMs were already provisioned. The bug was latent through v0.1.0–v0.1.5; v0.1.5 fixed the upstream Rocky CDN HEAD-block, which let the deploy reach the TLS step and surfaced this. `init.sh` now (1) generates a 4096-bit RSA root CA (`Bandolier Homelab Root CA`, 10y validity) when `pki/ca/pem` reports no certificate, and (2) PUTs the `traefik` role with `allow_any_name=true`, `max_ttl=8784h` (covers the api's 8760h request with 24h slack). Both ops are idempotent — the CA generate is gated by the existence check, and the role PUT is naturally rewrite-safe. Existing installs that already manually configured PKI via the v0.1.5 unblock commands are unaffected; the upgrade is a no-op for them.
+- **Deploy log stream `/ws/deployments/<id>/logs` no longer 403s when the UI is accessed from a non-localhost origin.** The ui container's `nginx.conf` was setting `proxy_set_header Host $host` on the `/api/` block but missing it on the `/ws/` block, so the api saw `Host: api:8080` while the browser's `Origin` was the operator's hostname — `coder/websocket`'s same-origin check rejected the upgrade with 403. Affects every operator running Bandolier on a headless VM and accessing the UI from a separate workstation. Fix is a one-line addition to `nginx.conf` matching what the `/api/` block already does. The `BANDOLIER_WS_ORIGIN_PATTERNS` env var is still the right escape hatch for multi-host setups (FQDN + IP, multiple LAN names, etc.).
+
 ## [0.1.5] — 2026-05-10
 
 Two-issue fix release driven by a real v0.1.4 deploy: the wizard now has a supported path around the upstream Rocky CDN HEAD-block, and the "Test reachability" button surfaces the exact `pveum acl modify` command when a token is missing the required role on a storage. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.5` (or `:0.1` / `:latest`) to upgrade.
