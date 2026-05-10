@@ -56,6 +56,73 @@ deploy/     docker-compose.yml + container images for vault, vault-agent, ui
 
 The data model is designed for multi-cluster from day one even though v0.1 ships with single-cluster scope. Future profiles (red-team / blue-team scenario clusters) plug into the same shape.
 
+## Architecture
+
+### Runtime components
+
+How the containers wire together and reach Proxmox. Everything inside the dashed box runs on the operator's host via `docker compose`; the only outbound traffic is to the Proxmox API and (later) the cloned VMs over SSH.
+
+```mermaid
+flowchart LR
+    Browser["Browser<br/>https://127.0.0.1"]
+
+    subgraph Stack["Bandolier stack — docker compose"]
+        direction LR
+        UI["ui<br/>nginx + React<br/>TLS termination"]
+        API["api<br/>Go service<br/>TF + Ansible drivers"]
+        Vault["vault<br/>KV / AppRole / PKI"]
+        VAgent["vault-agent<br/>init + unseal watcher"]
+        TLSInit["tls-init<br/>self-signed bootstrap"]
+    end
+
+    subgraph Targets["External targets"]
+        direction TB
+        Proxmox["Proxmox API"]
+        Nodes["k3s VMs<br/>1 server + 2 agents"]
+    end
+
+    Browser -- "HTTPS / WSS" --> UI
+    UI -- "REST / WS" --> API
+    API -- "AppRole login,<br/>read/write secrets" --> Vault
+    VAgent -- "init, unseal,<br/>issue AppRole" --> Vault
+    VAgent -. "shares creds<br/>via volume" .-> API
+    TLSInit -. "writes cert<br/>via volume" .-> UI
+    API -- "terraform apply" --> Proxmox
+    Proxmox -- "clones" --> Nodes
+    API -- "ansible-playbook<br/>over SSH" --> Nodes
+```
+
+### Provisioning flow
+
+What happens between hitting **Deploy** in the UI and a working k3s cluster. Logs stream back to the browser over a WebSocket throughout.
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    participant UI as ui (nginx)
+    participant API as api (Go)
+    participant V as vault
+    participant TF as Terraform
+    participant PVE as Proxmox
+    participant AN as Ansible
+    participant K3s as k3s VMs
+
+    Op->>UI: Submit Proxmox + network + SSH inputs
+    UI->>API: POST /clusters
+    API->>V: Store credentials (KV)
+    UI->>API: Open WS /logs
+    API->>TF: terraform apply
+    TF->>PVE: Clone cloud-init template × 3
+    PVE-->>TF: VM IDs and IPs
+    TF-->>API: Inventory
+    API->>AN: ansible-playbook k3s.yml
+    AN->>K3s: Install server, join agents, configure Traefik
+    K3s-->>AN: Ready
+    AN-->>API: Done
+    API-->>UI: Stream logs (WS)
+    UI-->>Op: Live progress + cluster ready
+```
+
 ## Tear down
 
 ```bash
