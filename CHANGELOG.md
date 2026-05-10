@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **"Test reachability" button is live** on the initialize wizard's Proxmox step (was a "coming soon" stub through v0.1.3). Pre-save: posts the current form values to a new `POST /api/proxmox/test` endpoint, which runs five validation checks against the operator's Proxmox host and returns a structured per-check result. Checks: endpoint reachable + token authenticates (combined `GET /api2/json/version`), node accessible, VM disk storage has `images` content type, image storage has `iso`, snippets storage has `snippets`. On failure, each check's `detail` field surfaces the precise fix — e.g. "Run: `pvesm set local --content backup,iso,vztmpl,snippets`" for the snippets check. Operator catches misconfigurations at the wizard, before the cluster row gets created. Backend lives in `api/internal/proxmox/` (new package) with httptest-based unit coverage of all five checks plus the bad-token short-circuit, missing-node, and missing-content-type paths.
+
 ## [0.1.3] — 2026-05-10
 
 Operator-config plumbing release: actually respect the wizard's storage fields, fix a silent fallback to `local-lvm` for the cloud-init drive, add a `proxmox_snippets_storage` config field for non-standard snippet storages, and ship two ops-side docs covering the Proxmox setup and the failure modes real operators have hit. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.3` (or `:0.1` / `:latest`) to upgrade.
