@@ -38,8 +38,9 @@ type initRequest struct {
 		Storage      string `json:"storage"`
 		Username     string `json:"username"`
 		Password     string `json:"password"`
-		ImageStorage string `json:"image_storage"`
-		Distro       string `json:"distro"`
+		ImageStorage    string `json:"image_storage"`
+		SnippetsStorage string `json:"snippets_storage"`
+		Distro          string `json:"distro"`
 		CustomURL    string `json:"custom_url"`
 		CustomSHA256 string `json:"custom_sha256"`
 		CABundle     string `json:"ca_bundle"`
@@ -120,6 +121,9 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 	if req.Proxmox.ImageStorage == "" {
 		req.Proxmox.ImageStorage = "local"
 	}
+	if req.Proxmox.SnippetsStorage == "" {
+		req.Proxmox.SnippetsStorage = "local"
+	}
 	if _, err := homelab.ResolveImage(req.Proxmox.Distro, req.Proxmox.CustomURL, req.Proxmox.CustomSHA256); err != nil {
 		_, _ = audit.Write(r.Context(), i.store, audit.Entry{
 			ActorID: uid,
@@ -192,8 +196,9 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 		"storage":       req.Proxmox.Storage,
 		"username":      req.Proxmox.Username,
 		"password":      req.Proxmox.Password,
-		"image_storage": req.Proxmox.ImageStorage,
-		"distro":        req.Proxmox.Distro,
+		"image_storage":    req.Proxmox.ImageStorage,
+		"snippets_storage": req.Proxmox.SnippetsStorage,
+		"distro":           req.Proxmox.Distro,
 		"custom_url":    req.Proxmox.CustomURL,
 		"custom_sha256": req.Proxmox.CustomSHA256,
 		"ca_bundle":     req.Proxmox.CABundle,

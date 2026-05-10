@@ -37,8 +37,14 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   initialization {
+    # Pin the cloud-init drive to the same datastore as the VM disk. Without
+    # this, the bpg/proxmox provider defaults to "local-lvm", which fails on
+    # any Proxmox host that doesn't have local-lvm — RBD-backed setups,
+    # Ceph-only homelabs, etc. Reported by an early user against vm_data
+    # (Ceph RBD).
+    datastore_id = var.datastore_id
     dns {
-      servers = var.dns #Change this later on to the DNS server that is being stood up
+      servers = var.dns
     }
     ip_config {
       ipv4 {

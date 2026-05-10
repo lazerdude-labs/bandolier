@@ -50,9 +50,11 @@ Volumes: `vault-data`, `vault-init-state`, `tf-state`, `app-data`, `tls`.
 ### Prerequisites
 
 - Docker + Docker Compose v2.
-- A reachable Proxmox host with an API token that can clone a cloud-init template (Rocky 9, Ubuntu, etc.).
+- A reachable Proxmox host with an API token that can clone a cloud-init template (Rocky 9, Ubuntu, etc.). See [`docs/proxmox-setup.md`](docs/proxmox-setup.md) for a step-by-step on token creation, required permissions, and storage layout.
 - A `/24` (or larger) on a VLAN routable from your Proxmox host.
 - A wildcard DNS record (or an authoritative DNS server you can update via TSIG) for the cluster's FQDN — optional, only required if you want Bandolier to issue per-app wildcard certs.
+
+If a deploy fails, [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) collects the cases real operators have hit (token permissions, snippets content type, CDN HEAD-blocking, etc.) with verified fixes.
 
 ## How it's organized
 

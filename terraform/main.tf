@@ -15,7 +15,7 @@ locals {
       type         = "x86-64-v2-AES"
       ram          = 8192
       disk_size    = 120
-      datastore_id = "local-lvm"
+      datastore_id = var.proxmox_storage
       file_id      = local.cloud_image_file_id
       interface    = "virtio0"
       iothread     = true
@@ -35,7 +35,7 @@ locals {
       type         = "x86-64-v2-AES"
       ram          = 4096
       disk_size    = 120
-      datastore_id = "local-lvm"
+      datastore_id = var.proxmox_storage
       file_id      = local.cloud_image_file_id
       interface    = "virtio0"
       iothread     = true
@@ -55,7 +55,7 @@ locals {
       type         = "x86-64-v2-AES"
       ram          = 4096
       disk_size    = 120
-      datastore_id = "local-lvm"
+      datastore_id = var.proxmox_storage
       file_id      = local.cloud_image_file_id
       interface    = "virtio0"
       iothread     = true
@@ -88,7 +88,7 @@ resource "local_file" "cloudinit" {
 resource "proxmox_virtual_environment_file" "rocky_config" {
   for_each     = local.vm_definitions
   content_type = "snippets"
-  datastore_id = "local"
+  datastore_id = var.proxmox_snippets_storage
   node_name    = each.value.node
 
   source_file {
