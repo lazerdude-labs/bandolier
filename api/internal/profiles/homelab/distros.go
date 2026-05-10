@@ -10,12 +10,18 @@ import (
 
 // Distro describes a cloud image entry — either a curated catalog entry or
 // a custom image resolved at request time.
+//
+// URLs is an ordered preference list of mirror URLs that all serve the same
+// SHA256-pinned bytes. A custom image always has a single-element URLs;
+// curated entries may list multiple mirrors so a transient 403 from one
+// (rocky #11) doesn't break the deploy. The active URL is picked at deploy
+// time by HEAD-probing each candidate (see PickReachableURL).
 type Distro struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	URL      string `json:"url"`
-	SHA256   string `json:"sha256"`
-	FileName string `json:"file_name"`
+	ID       string   `json:"id"`
+	Label    string   `json:"label"`
+	URLs     []string `json:"urls"`
+	SHA256   string   `json:"sha256"`
+	FileName string   `json:"file_name"`
 }
 
 // Catalog is the curated set of cloud images supported by the homelab profile.
@@ -25,11 +31,20 @@ type Distro struct {
 // under content_type=iso ("Parameter verification failed: wrong file
 // extension"). Bytes are unchanged — Proxmox stores the qcow2 payload under
 // the .img name and the VM disk block consumes it fine.
+//
+// URLs lists Rocky's master + the documented mirrorlist redirector + a
+// long-standing third-party mirror. Order = preference; the deploy path
+// picks the first that responds 2xx to a HEAD probe. All entries serve the
+// same bytes so the shared SHA256 verifies all of them.
 var Catalog = map[string]Distro{
 	"rocky9": {
-		ID:       "rocky9",
-		Label:    "Rocky Linux 9",
-		URL:      "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2",
+		ID:    "rocky9",
+		Label: "Rocky Linux 9",
+		URLs: []string{
+			"https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2",
+			"https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2",
+			"https://mirror.rackspace.com/rockylinux/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2",
+		},
 		SHA256:   "15d81d3434b298142b2fdd8fb54aef2662684db5c082cc191c3c79762ed6360c",
 		FileName: "Rocky-9-GenericCloud.latest.x86_64.img",
 	},
@@ -87,7 +102,7 @@ func ResolveImage(distroID, customURL, customSHA string) (Distro, error) {
 	return Distro{
 		ID:       "custom",
 		Label:    "Custom image",
-		URL:      customURL,
+		URLs:     []string{customURL},
 		SHA256:   customSHA,
 		FileName: fileName,
 	}, nil

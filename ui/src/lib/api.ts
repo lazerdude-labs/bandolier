@@ -313,7 +313,7 @@ export const fetchWSToken = () =>
 export type Distro = {
   id: string;
   label: string;
-  url: string;
+  urls: string[];
   sha256: string;
   file_name: string;
 };

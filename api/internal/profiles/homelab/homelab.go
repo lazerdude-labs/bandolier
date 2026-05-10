@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,27 @@ func (p *Profile) BuildTfvars(ctx context.Context, clusterID string, vr profiles
 		return nil, fmt.Errorf("resolve image: %w", err)
 	}
 
+	// Pick a reachable mirror from the candidate list. If all probes fail
+	// (network blip, all mirrors 403, etc.), fall through to the first URL
+	// rather than blocking the deploy: the api container's egress isn't
+	// guaranteed to match Proxmox's, so a probe failure here doesn't prove
+	// Proxmox can't fetch. Operator gets the original behavior + a warning
+	// log explaining what we tried.
+	imageURL, attempts, perr := PickReachableURL(ctx, img.URLs, nil)
+	if perr != nil {
+		imageURL = img.URLs[0]
+		slog.Warn("image mirror probe failed for all candidates; falling back to first URL",
+			"cluster_id", clusterID, "fallback_url", imageURL, "error", perr.Error())
+	} else if len(attempts) > 0 {
+		// Picked a non-primary; surface the skipped mirrors for operator visibility.
+		skipped := make([]string, len(attempts))
+		for i, a := range attempts {
+			skipped[i] = a.Error()
+		}
+		slog.Info("image mirror probe selected fallback",
+			"cluster_id", clusterID, "selected_url", imageURL, "skipped", skipped)
+	}
+
 	imageStorage, _ := prox["image_storage"].(string)
 	if imageStorage == "" {
 		imageStorage = "local"
@@ -69,7 +91,7 @@ func (p *Profile) BuildTfvars(ctx context.Context, clusterID string, vr profiles
 		"proxmox_storage":        prox["storage"],
 		"proxmox_username":       prox["username"],
 		"proxmox_password":       prox["password"],
-		"proxmox_image_url":      img.URL,
+		"proxmox_image_url":      imageURL,
 		"proxmox_image_sha256":   img.SHA256,
 		"proxmox_image_filename": img.FileName,
 		"proxmox_image_storage":  imageStorage,
