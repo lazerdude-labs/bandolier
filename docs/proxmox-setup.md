@@ -186,7 +186,9 @@ If your Proxmox host has outbound HTTPS to `dl.rockylinux.org` (or one of the al
 
 ### When you need to pre-upload
 
-If your network blocks outbound, all upstream mirrors HEAD-block your User-Agent, or you want a deterministic offline-friendly setup, pre-upload the image once:
+If your network blocks outbound, all upstream mirrors HEAD-block your User-Agent (Rocky's `dl.rockylinux.org` does this consistently as of 2026-05), or you want a deterministic offline-friendly setup, pre-upload the image once.
+
+**Step 1 — fetch the image and stage it on Proxmox:**
 
 ```bash
 # On a machine with internet
@@ -196,12 +198,20 @@ curl -fOL https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-Gene
 curl -fOL https://download.rockylinux.org/pub/rocky/9/images/x86_64/CHECKSUM
 sha256sum -c --ignore-missing CHECKSUM
 
-# Upload to Proxmox. The filename Bandolier expects is in
-# api/internal/profiles/homelab/distros.go (e.g. rocky9.img).
-scp Rocky-9-GenericCloud.latest.x86_64.qcow2 root@<proxmox-host>:/var/lib/vz/template/iso/rocky9.img
+# Upload to Proxmox. The filename MUST match the catalog entry for your
+# selected distro. For Rocky 9 that's:
+#   Rocky-9-GenericCloud.latest.x86_64.img
+# (Proxmox rejects the .qcow2 extension under content_type=iso, so rename
+# during upload.) Definitive source: api/internal/profiles/homelab/distros.go.
+scp Rocky-9-GenericCloud.latest.x86_64.qcow2 \
+    root@<proxmox-host>:/var/lib/vz/template/iso/Rocky-9-GenericCloud.latest.x86_64.img
 ```
 
-Once the file is in place at the expected location, the next deploy will see it exists and skip the download. (Bandolier's terraform passes `overwrite = false` to `proxmox_virtual_environment_download_file`.)
+**Step 2 — tick the toggle in the initialize wizard (v0.1.5+):**
+
+On the Proxmox step, check **"Image already uploaded to Proxmox (skip download)"**. With the toggle on, terraform references the existing file via a `data "proxmox_virtual_environment_file"` source and never issues a download. Without the toggle, terraform will still try to download (and on a HEAD-blocking mirror, fail before it gets to the file you placed).
+
+The `proxmox_image_url` and `custom_sha256` fields are ignored when the toggle is on — the file is whatever you put on Proxmox, so verify the SHA256 yourself before uploading.
 
 ### Custom URL
 

@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -191,8 +192,18 @@ func apiGet(ctx context.Context, client *http.Client, url, authHdr string) ([]by
 	}
 	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(res.Body)
-	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("HTTP %d (token unauthorized or missing permission): %s", res.StatusCode, truncate(string(body), 200))
+	// 401 = bad token (wrong secret, expired, revoked) — never a permission
+	// issue, so don't surface a permission hint that would misdirect the
+	// operator. 403 = "Permission check failed" against a specific ACL path,
+	// which permissionHint is shaped for.
+	if res.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("HTTP 401 (token unauthorized — wrong/expired/revoked): %s", truncate(string(body), 200))
+	}
+	if res.StatusCode == http.StatusForbidden {
+		if hint := permissionHint(string(body)); hint != "" {
+			return nil, fmt.Errorf("HTTP 403: %s", hint)
+		}
+		return nil, fmt.Errorf("HTTP 403 (token missing permission): %s", truncate(string(body), 200))
 	}
 	if res.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("HTTP 404 (resource not found): %s", truncate(string(body), 200))
@@ -258,6 +269,73 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// permissionHintRe matches the Proxmox 403 body pattern
+// `Permission check failed (<path>, <priv1>|<priv2>|...)` and captures the
+// ACL path and the missing privilege list. Proxmox emits this in the response
+// body for any token-vs-ACL mismatch; the path is what we use to recommend
+// the right pveum command.
+var permissionHintRe = regexp.MustCompile(`Permission check failed \(([^,]+),\s*([^)]+)\)`)
+
+// permPathRe / permPrivRe define the strict shape we accept for captured
+// values. Anything outside these classes is rejected and we fall back to
+// the raw-body error path. Reason: the captured values get embedded into a
+// suggested shell command in the operator-facing detail field. Even though
+// React text-renders the detail (no XSS) and JSON-marshals it (no header
+// injection), an attacker-controlled-or-misconfigured Proxmox could craft a
+// 403 body whose captured "privs" group includes plausible-looking but
+// malicious shell snippets that the operator might copy-paste. Limiting
+// captures to ACL path / privilege identifiers makes that vector untenable.
+//
+// Length caps are belt-and-suspenders against pathological inputs (e.g. a
+// 5MB body where the entire body falls inside one regex group); apiGet
+// already reads bodies into memory unbounded so this is more about not
+// emitting a multi-line error than DoS.
+var (
+	permPathRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.-]{1,128}$`)
+	permPrivRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9.|_-]{0,127}$`)
+)
+
+// permissionHint converts a Proxmox 403 body into an actionable single-line
+// hint with the exact pveum command to fix the missing ACL. Returns "" when
+// the body doesn't match the recognized pattern OR when captured values
+// fall outside the strict permPathRe / permPrivRe shapes; callers fall back
+// to the raw body in that case.
+//
+// The recommended role is chosen by ACL path prefix:
+//   - /storage/* → PVEDatastoreAdmin (covers Datastore.Audit + AllocateSpace
+//     + AllocateTemplate, all of which the wizard's storage-content checks
+//     and Bandolier's terraform need).
+//   - /nodes/*   → PVEAuditor for the read-only preflight check; deploy
+//     requires PVEVMAdmin which we mention but don't lead with.
+//   - other      → no role recommendation; the raw privilege list is shown.
+//
+// We deliberately don't substitute the operator's actual token ID into the
+// command — the wizard knows it but baking it into log lines or surfaced
+// errors invites it leaking via screenshots/CI logs. The operator can
+// substitute their own.
+func permissionHint(body string) string {
+	m := permissionHintRe.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	path := strings.TrimSpace(m[1])
+	privs := strings.TrimSpace(m[2])
+	if !permPathRe.MatchString(path) || !permPrivRe.MatchString(privs) {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(path, "/storage/"):
+		return fmt.Sprintf("token missing %s on %s. Fix on Proxmox: `pveum acl modify %s --tokens '<your-token-id>' --roles PVEDatastoreAdmin --propagate 1` (or grant %s individually).",
+			"PVEDatastoreAdmin", path, path, privs)
+	case strings.HasPrefix(path, "/nodes/"):
+		return fmt.Sprintf("token missing privilege on %s (needs %s). Fix on Proxmox: `pveum acl modify %s --tokens '<your-token-id>' --roles PVEAuditor --propagate 1` for the preflight; deploy also needs PVEVMAdmin on this path.",
+			path, privs, path)
+	default:
+		return fmt.Sprintf("token missing privilege on %s (needs %s). Grant via `pveum acl modify %s --tokens '<your-token-id>' --roles <Role> --propagate 1`.",
+			path, privs, path)
+	}
 }
 
 // buildHTTPClient mirrors internal/telemetry/proxmox.go's helper. Empty

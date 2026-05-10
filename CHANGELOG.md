@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-05-10
+
+Two-issue fix release driven by a real v0.1.4 deploy: the wizard now has a supported path around the upstream Rocky CDN HEAD-block, and the "Test reachability" button surfaces the exact `pveum acl modify` command when a token is missing the required role on a storage. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.5` (or `:0.1` / `:latest`) to upgrade.
+
+### Added
+
+- **"Image already uploaded to Proxmox (skip download)" toggle** on the initialize wizard's Proxmox step. When enabled, terraform references an existing file at `<image_storage>:iso/<filename>` via a `data "proxmox_virtual_environment_file"` source instead of issuing the `proxmox_virtual_environment_download_file` call that the bpg provider routes through Proxmox's HEAD-blocked fetcher. Workaround for upstream CDN HEAD-blocks (Rocky's `dl.rockylinux.org` filters Proxmox's User-Agent and returns a hard 403 on HEAD), now first-class instead of a TROUBLESHOOTING.md side door. Wizard hint includes the expected catalog filename for the selected distro (e.g. `Rocky-9-GenericCloud.latest.x86_64.img`). Threads through `proxmox.image_pre_uploaded` in Vault, the `proxmox_image_pre_uploaded` tfvar, and a `count`-gated resource/data toggle in `terraform/cloud_image.tf`. Closes #23.
+
+### Changed
+
+- **"Test reachability" failure detail now suggests the precise `pveum acl modify` command** when Proxmox returns a 403 with a `Permission check failed (<path>, <privs>)` body — the most common token-vs-storage mismatch operators hit on first install. For `/storage/<name>` paths the detail now reads "token missing PVEDatastoreAdmin on /storage/<name>. Fix on Proxmox: `pveum acl modify /storage/<name> --tokens '<your-token-id>' --roles PVEDatastoreAdmin --propagate 1`". For `/nodes/<name>` paths it suggests `PVEAuditor` for the preflight and notes that `PVEVMAdmin` is also needed for deploy. The hint only fires on 403; 401 (bad/expired/revoked token) keeps the original "token unauthorized" detail so it can't misdirect to an ACL grant. Captured path/privilege values are allowlisted (`/[a-zA-Z0-9/_.-]{1,128}` and `[A-Za-z][A-Za-z0-9.|_-]{0,127}`) before being interpolated into the suggested command, so a malicious or misconfigured Proxmox can't reflect crafted shell snippets into the operator-facing detail. Previously the detail field surfaced the raw HTTP body and operators had to look up which privilege their role needed to grant.
+
+### Security
+
+- **Audit log records `image_pre_uploaded` choice per cluster init.** When the operator opts into the pre-upload path they bypass Proxmox's terraform-driven SHA256 verification (the `data "proxmox_virtual_environment_file"` source has no checksum field — Proxmox just trusts the file already at `<storage>:iso/<filename>`); the audit entry's `Details` now includes `image_pre_uploaded: bool` and `edit_mode: bool` so the forensic trail makes it clear when integrity was verifier-skipped on a given cluster init. Wizard hint also calls out the operator's responsibility to verify the SHA256 before checking the box.
+
 ## [0.1.4] — 2026-05-10
 
 Wizard quality of life: the "Test reachability" button is live (was a coming-soon stub) and operators can now edit a cluster's configuration after first save. No breaking changes; pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.4` (or `:0.1` / `:latest`) to upgrade.

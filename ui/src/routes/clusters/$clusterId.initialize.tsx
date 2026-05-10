@@ -91,6 +91,7 @@ function viewToInput(v: InitializeView): Partial<InitializeInput> {
       ca_bundle: v.proxmox.ca_bundle,
       image_storage: v.proxmox.image_storage || 'local',
       snippets_storage: v.proxmox.snippets_storage || 'local',
+      image_pre_uploaded: v.proxmox.image_pre_uploaded ?? false,
       distro: v.proxmox.distro,
       custom_url: v.proxmox.custom_url,
       custom_sha256: v.proxmox.custom_sha256,
