@@ -74,6 +74,19 @@ For deployments with stricter requirements, the right answer is not encrypted-at
 - **`docker logs deploy-vault-agent-1` is operator-readable.** The current script never logs key material, but anyone modifying `init.sh` should keep that contract — never `log` a variable holding a token, role-id, secret-id, or unseal key. Treat the log stream as if it were attached to a ticket someone will paste later.
 - **If the host is compromised, rotate.** Issue a new Vault deployment from scratch. The leaked keys grant indefinite access to every secret Vault holds.
 
+## PKI role: `traefik` is `allow_any_name=true`
+
+`init.sh` (v0.1.6+) bootstraps a `traefik` PKI role with `allow_any_name=true` so the api's `IssueWildcardCert` can mint a wildcard cert for whatever cluster FQDN the operator picked in the wizard. Vault enforces the role's privilege boundary, but within that boundary the role accepts **any** common_name.
+
+**Realistic attack:** an attacker who exfiltrates the api's AppRole `secret_id` (which is mounted at `/vault-init-state/approle.json` inside the api container, and which the `bandolier-api` policy grants `pki/issue/traefik`) can issue a self-signed cert for any internal name — `*.gitlab.rplab.lan`, `*.victim.local`, anything — and use it for in-LAN MITM against operators who installed the Bandolier root CA in their trust store.
+
+**Why we accept this for v1:**
+- The CA is a self-signed homelab root with **no public trust**. Certs it issues carry zero weight outside hosts where the operator deliberately added it.
+- The AppRole `secret_id` is on the same volume as `init.json`; an attacker with file access to that volume already has full Vault access (the broader threat model above already grants them everything).
+- The only marginal exposure is operators who add the Bandolier root to their workstation's trust store and then pivot through LAN services. The fix narrows attacker capability from "full Vault" to "full Vault minus the ability to mint convincing internal certs," which is a small delta.
+
+**v2 mitigation:** scope the `traefik` role per-cluster at deploy time with `allowed_domains=[<cluster_fqdn>]` and `allow_subdomains=true`. The api would either rotate the role on each deploy or use a dynamically-templated role. Out of scope for v0.1.x.
+
 ## Future work
 
 Items that would tighten the boundary, listed for completeness:
@@ -81,5 +94,6 @@ Items that would tighten the boundary, listed for completeness:
 - Pin `hashicorp/vault:1.16` by digest (defends against backdoored re-publication).
 - Add a hostport-bound recovery shell that requires a passphrase, separate from the boot-time unseal path (lets paranoid operators opt into encrypted-at-rest without breaking automatic recovery).
 - Auto-unseal via cloud KMS / Vault transit / a dedicated HSM (changes the architecture; not appropriate for self-contained homelab deployment).
+- Per-cluster scoped `traefik` PKI role (see "PKI role" above).
 
 These are not blocked by this design and can be added later without rework.

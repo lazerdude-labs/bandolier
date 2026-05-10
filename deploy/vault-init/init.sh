@@ -95,6 +95,49 @@ setup_if_needed() {
       -d '{"type":"pki","config":{"max_lease_ttl":"87600h"}}' >/dev/null
   fi
 
+  # PKI bootstrap: root CA + `traefik` role. Required because the api's
+  # IssueWildcardCert (api/internal/clusters/cert.go) calls
+  # pki/issue/traefik on every cluster deploy at the TLS-wildcard step;
+  # without these, deploys fail with "unknown role: traefik" after the
+  # VMs are already provisioned.
+  #
+  # CA presence is detected by reading pki/ca/pem and looking for a PEM
+  # header. A fresh mount returns 200 with an empty body; an initialized
+  # mount returns the certificate. We deliberately do NOT use `-f` here:
+  # under `set -o pipefail`, a transient Vault 5xx on this read would
+  # abort setup_if_needed before reaching the generate call, leaving the
+  # mount permanently CA-less. With `-sS`, a non-2xx returns whatever
+  # body Vault produced (typically a JSON error), which won't contain
+  # the PEM header — so the missing-CA branch fires and the generate
+  # call below either succeeds or surfaces the underlying error itself.
+  # Generation is one-shot: Vault rejects a second generate/internal
+  # once a root issuer exists, which is why the check guards the call.
+  if ! curl -sS -H "X-Vault-Token: $VAULT_TOKEN" \
+        "$VAULT_ADDR/v1/pki/ca/pem" 2>/dev/null \
+        | grep -q "BEGIN CERTIFICATE"; then
+    log "generating pki root CA"
+    curl -fsS -X POST -H "X-Vault-Token: $VAULT_TOKEN" \
+      "$VAULT_ADDR/v1/pki/root/generate/internal" \
+      -d '{"common_name":"Bandolier Homelab Root CA","ttl":"87600h","key_type":"rsa","key_bits":4096}' >/dev/null
+  fi
+
+  # The traefik role gates pki/issue/traefik. PUT is idempotent — re-runs
+  # rewrite the same definition with no observable side effect. max_ttl
+  # 8784h covers the api's 8760h request with 24h slack.
+  #
+  # Threat-model note: `allow_any_name=true` permits issuance for any
+  # common_name. This is acceptable for v1 because (a) the CA is a
+  # self-signed homelab root with no public trust, and (b) the only
+  # caller is IssueWildcardCert with operator-set FQDNs. The realistic
+  # risk is lateral movement: a compromised AppRole secret_id (granting
+  # `pki/issue/traefik` per policy.hcl) could mint a cert for any
+  # internal name (e.g. *.gitlab.rplab.lan) and pivot. v2 will scope
+  # this with `allowed_domains` per-cluster at deploy time. See
+  # ./THREAT_MODEL.md.
+  curl -fsS -X PUT -H "X-Vault-Token: $VAULT_TOKEN" \
+    "$VAULT_ADDR/v1/pki/roles/traefik" \
+    -d '{"allow_any_name":true,"max_ttl":"8784h"}' >/dev/null
+
   curl -fsS -X PUT -H "X-Vault-Token: $VAULT_TOKEN" \
     "$VAULT_ADDR/v1/sys/policies/acl/bandolier-api" \
     --data-binary @<(jq -Rs '{policy:.}' /policy.hcl) >/dev/null
