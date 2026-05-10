@@ -76,6 +76,12 @@ variable "proxmox_image_storage" {
   default     = "local"
 }
 
+variable "proxmox_snippets_storage" {
+  description = "Proxmox storage pool (with 'snippets' content type) where per-VM cloud-init configs are uploaded. Must have 'snippets' enabled in `pvesm set <storage> --content ...,snippets`."
+  type        = string
+  default     = "local"
+}
+
 ###################################
 # Network
 ###################################

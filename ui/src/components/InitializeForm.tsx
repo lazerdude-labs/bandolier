@@ -18,6 +18,7 @@ const homelabDefaults: Partial<InitializeInput> = {
     password: '',
     ca_bundle: '',
     image_storage: 'local',
+    snippets_storage: 'local',
     distro: 'rocky9',
     custom_url: '',
     custom_sha256: '',
@@ -53,7 +54,7 @@ const steps = [
 
 // Field paths used by react-hook-form trigger() for per-step validation.
 const stepFields: Array<string[]> = [
-  ['proxmox.endpoint', 'proxmox.token_id', 'proxmox.token_secret', 'proxmox.node', 'proxmox.storage', 'proxmox.username', 'proxmox.password', 'proxmox.image_storage', 'proxmox.distro', 'proxmox.custom_url', 'proxmox.custom_sha256'],
+  ['proxmox.endpoint', 'proxmox.token_id', 'proxmox.token_secret', 'proxmox.node', 'proxmox.storage', 'proxmox.username', 'proxmox.password', 'proxmox.image_storage', 'proxmox.snippets_storage', 'proxmox.distro', 'proxmox.custom_url', 'proxmox.custom_sha256'],
   ['network.cidr', 'network.gateway', 'network.dns', 'network.fqdn', 'network.master_ip', 'network.agent1_ip', 'network.agent2_ip', 'network.vlan', 'network.bridge_name', 'network.dns_server', 'network.dns_zone', 'network.tsig_name', 'network.tsig_secret'],
   // SSH step: optional BYO keypair. Schema enforces both-or-neither.
   ['ssh.public_key', 'ssh.private_key'],
@@ -188,6 +189,7 @@ function buildSummary(v: Partial<InitializeInput>): SummarySection[] {
         { label: 'Token id', value: v.proxmox?.token_id || '' },
         { label: 'Secret',   value: v.proxmox?.token_secret ? 'set' : '' },
         { label: 'Image storage', value: v.proxmox?.image_storage || 'local' },
+        { label: 'Snippets storage', value: v.proxmox?.snippets_storage || 'local' },
         { label: 'Image source',  value: v.proxmox?.distro || (v.proxmox?.custom_url ? 'custom URL' : '—'), mono: false },
       ],
     },
@@ -261,10 +263,17 @@ function ProxmoxStep() {
           {err?.password ? <span className="field-error">{String(err.password.message)}</span> : null}
         </div>
       </div>
-      <div className="field">
-        <label className="field-label">Image storage</label>
-        <input className="input mono" placeholder="local" {...register('proxmox.image_storage')} />
-        <span className="field-hint">Proxmox storage pool with 'iso' content type. Default: 'local'.</span>
+      <div className="form-grid">
+        <div className="field">
+          <label className="field-label">Image storage</label>
+          <input className="input mono" placeholder="local" {...register('proxmox.image_storage')} />
+          <span className="field-hint">Storage pool with 'iso' content type. Default: 'local'.</span>
+        </div>
+        <div className="field">
+          <label className="field-label">Snippets storage</label>
+          <input className="input mono" placeholder="local" {...register('proxmox.snippets_storage')} />
+          <span className="field-hint">Storage pool with 'snippets' content type. Default: 'local'. Enable with <code>pvesm set &lt;storage&gt; --content ...,snippets</code> if needed.</span>
+        </div>
       </div>
       <div className="field">
         <label className="field-label">Image source</label>
