@@ -68,6 +68,12 @@ func (f *fakeProxmox) handler() http.Handler {
 	})
 }
 
+// newFake stands up a small subset of the Proxmox REST API for tests.
+// httptest.NewTLSServer generates a self-signed cert; RunTests called with
+// CABundle="" hits the InsecureSkipVerify branch in buildHTTPClient and
+// accepts that cert. Any test that needs a strict-TLS path would have to
+// thread the server's CA bundle through, which we don't currently exercise
+// (the strict-TLS branch is covered by TestBuildTLSConfig_* unit tests).
 func newFake(t *testing.T) (*fakeProxmox, *httptest.Server) {
 	t.Helper()
 	f := &fakeProxmox{
@@ -85,24 +91,9 @@ func newFake(t *testing.T) (*fakeProxmox, *httptest.Server) {
 	return f, srv
 }
 
-// runWithFakeClient runs RunTests but swaps in the fake server's TLS-trusting
-// http.Client so we don't need the (insecure) InsecureSkipVerify path during
-// tests.
-func runWithFakeClient(t *testing.T, srv *httptest.Server, req TestRequest) TestResult {
-	t.Helper()
-	// Replace buildHTTPClient by directly invoking the inner logic with the
-	// fake server's client. We can't pass a client into RunTests, so we need
-	// a helper that mirrors RunTests but uses a custom client. Easiest path:
-	// have the test use the fake server's URL with the public RunTests +
-	// CABundle empty (which sets InsecureSkipVerify=true, accepting the
-	// fake's self-signed cert). Functionally equivalent for tests, no extra
-	// production seam needed.
-	return RunTests(context.Background(), req)
-}
-
 func TestRunTests_AllChecksPass(t *testing.T) {
 	f, srv := newFake(t)
-	got := runWithFakeClient(t, srv, TestRequest{
+	got := RunTests(context.Background(), TestRequest{
 		Endpoint:        srv.URL,
 		TokenID:         "root@pam!t",
 		TokenSecret:     f.tokenSecret,
@@ -130,7 +121,7 @@ func TestRunTests_AllChecksPass(t *testing.T) {
 
 func TestRunTests_BadToken_ShortCircuits(t *testing.T) {
 	_, srv := newFake(t)
-	got := runWithFakeClient(t, srv, TestRequest{
+	got := RunTests(context.Background(), TestRequest{
 		Endpoint:        srv.URL,
 		TokenID:         "root@pam!t",
 		TokenSecret:     "wrong-secret",
@@ -153,7 +144,7 @@ func TestRunTests_BadToken_ShortCircuits(t *testing.T) {
 
 func TestRunTests_NodeMissing(t *testing.T) {
 	f, srv := newFake(t)
-	got := runWithFakeClient(t, srv, TestRequest{
+	got := RunTests(context.Background(), TestRequest{
 		Endpoint:        srv.URL,
 		TokenID:         "root@pam!t",
 		TokenSecret:     f.tokenSecret,
@@ -177,7 +168,7 @@ func TestRunTests_NodeMissing(t *testing.T) {
 func TestRunTests_SnippetsContentMissing(t *testing.T) {
 	f, srv := newFake(t)
 	// Point snippets at "local" which has only iso,vztmpl,backup — no snippets
-	got := runWithFakeClient(t, srv, TestRequest{
+	got := RunTests(context.Background(), TestRequest{
 		Endpoint:        srv.URL,
 		TokenID:         "root@pam!t",
 		TokenSecret:     f.tokenSecret,
@@ -210,7 +201,7 @@ func TestRunTests_SnippetsContentMissing(t *testing.T) {
 
 func TestRunTests_AllStoragesMissing(t *testing.T) {
 	f, srv := newFake(t)
-	got := runWithFakeClient(t, srv, TestRequest{
+	got := RunTests(context.Background(), TestRequest{
 		Endpoint:        srv.URL,
 		TokenID:         "root@pam!t",
 		TokenSecret:     f.tokenSecret,

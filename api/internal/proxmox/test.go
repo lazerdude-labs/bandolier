@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -88,8 +89,13 @@ func RunTests(ctx context.Context, req TestRequest) TestResult {
 		Status: "ok", Detail: extractVersion(versionBody),
 	})
 
-	// 2. Node accessible.
-	if _, err := apiGet(ctx, client, base+"/api2/json/nodes/"+req.Node+"/status", authHdr); err != nil {
+	// 2. Node accessible. PathEscape the operator-supplied node name so a
+	// crafted value like "pve/../../version" can't traverse to a different
+	// API endpoint and silently produce a fake "ok" result. The operator is
+	// authenticated and could bypass the check via the initialize endpoint
+	// regardless, but a fake-OK from this preflight is also a correctness
+	// bug (operator thinks their config is valid when it isn't).
+	if _, err := apiGet(ctx, client, base+"/api2/json/nodes/"+url.PathEscape(req.Node)+"/status", authHdr); err != nil {
 		checks = append(checks, Check{
 			Name: "node_exists", Label: fmt.Sprintf("Node %q accessible", req.Node),
 			Status: "fail", Detail: err.Error(),
@@ -125,10 +131,14 @@ func RunTests(ctx context.Context, req TestRequest) TestResult {
 // exists on the node AND its `content` list includes the required type. On
 // failure (404, missing content type, etc.) the Detail tells the operator
 // the precise pvesm command to fix the most common case.
+//
+// Path segments (node + storage) are url.PathEscape'd to keep operator-
+// supplied values from traversing the URL — see RunTests for the rationale.
 func checkStorageContent(ctx context.Context, client *http.Client, base, authHdr, node,
 	name, labelBase, storage, requiredContent string) Check {
 	label := fmt.Sprintf("%s %q has %q content type", labelBase, storage, requiredContent)
-	body, err := apiGet(ctx, client, base+"/api2/json/nodes/"+node+"/storage/"+storage+"/status", authHdr)
+	body, err := apiGet(ctx, client,
+		base+"/api2/json/nodes/"+url.PathEscape(node)+"/storage/"+url.PathEscape(storage)+"/status", authHdr)
 	if err != nil {
 		return Check{Name: name, Label: label, Status: "fail", Detail: err.Error()}
 	}
@@ -137,10 +147,21 @@ func checkStorageContent(ctx context.Context, client *http.Client, base, authHdr
 		return Check{Name: name, Label: label, Status: "fail", Detail: parseErr.Error()}
 	}
 	if !contains(contents, requiredContent) {
+		// Build the pvesm command without a leading comma when the existing
+		// content list is empty (rare — newly-created dir storage with no
+		// content types yet). With a leading comma, pvesm rejects the
+		// command.
+		existing := strings.Join(contents, ",")
+		var fix string
+		if existing == "" {
+			fix = fmt.Sprintf("pvesm set %s --content %s", storage, requiredContent)
+		} else {
+			fix = fmt.Sprintf("pvesm set %s --content %s,%s", storage, existing, requiredContent)
+		}
 		return Check{
 			Name: name, Label: label, Status: "fail",
-			Detail: fmt.Sprintf("storage exists but its content list (%v) does not include %q. Enable with: pvesm set %s --content %s,%s",
-				contents, requiredContent, storage, strings.Join(contents, ","), requiredContent),
+			Detail: fmt.Sprintf("storage exists but its content list (%v) does not include %q. Enable with: %s",
+				contents, requiredContent, fix),
 		}
 	}
 	return Check{Name: name, Label: label, Status: "ok"}
@@ -150,6 +171,12 @@ func checkStorageContent(ctx context.Context, client *http.Client, base, authHdr
 // returns the response body on 2xx and a descriptive error otherwise. The
 // 5s timeout per request keeps the wizard responsive when Proxmox is slow
 // or unreachable; the caller's context governs the overall budget.
+//
+// Note on error contents: a transport-level failure produces a *url.Error
+// whose .Error() includes the full request URL but NOT the Authorization
+// header (Go's net/http never reflects request headers in error strings).
+// The token never appears in any error wrapped by this function. If a
+// future logger ever surfaces these errors, that property still holds.
 func apiGet(ctx context.Context, client *http.Client, url, authHdr string) ([]byte, error) {
 	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
