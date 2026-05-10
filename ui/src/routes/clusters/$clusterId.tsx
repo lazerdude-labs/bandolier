@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Server, Rocket, ArrowUpCircle, Trash2, Download, Box, RefreshCw, ChevronRight } from 'lucide-react';
-import { getCluster, destroyCluster, listClusterDeployments, listProfiles, listNodes, retrieveKubeconfig, upgradeCluster, getJoinToken, retrieveJoinToken, api, type Deployment , errMessage } from '@/lib/api';
+import { Server, Rocket, ArrowUpCircle, Trash2, Download, Box, RefreshCw, ChevronRight, Eraser } from 'lucide-react';
+import { getCluster, destroyCluster, deleteCluster, listClusterDeployments, listProfiles, listNodes, retrieveKubeconfig, upgradeCluster, getJoinToken, retrieveJoinToken, api, type Deployment , errMessage } from '@/lib/api';
 import { StatusBadge, type ClusterStatus } from '@/components/StatusBadge';
 import { ActionBar, type Action } from '@/components/ActionRail';
 import { NodeTable } from '@/components/NodeTable';
@@ -10,6 +10,7 @@ import { NetworkPanel } from '@/components/NetworkPanel';
 import { ConnectionPanel } from '@/components/ConnectionPanel';
 import { ProxmoxPanel } from '@/components/ProxmoxPanel';
 import { DestroyModal } from '@/components/DestroyModal';
+import { ForgetClusterModal } from '@/components/ForgetClusterModal';
 import { UpgradeModal } from '@/components/UpgradeModal';
 import { useToasts } from '@/store/toasts';
 
@@ -60,6 +61,7 @@ export function ClusterOverview() {
   });
   const [showDestroy, setShowDestroy] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [showForget, setShowForget] = useState(false);
 
   const deploy = useMutation({
     mutationFn: () => api<{ deployment_id: string }>('POST', `/api/clusters/${clusterId}/deploy`),
@@ -78,6 +80,17 @@ export function ClusterOverview() {
     },
     onError: (err: unknown) =>
       push({ kind: 'error', title: 'Destroy failed to start', body: errMessage(err, 'unknown') }),
+  });
+  const forget = useMutation({
+    mutationFn: () => deleteCluster(clusterId),
+    onSuccess: () => {
+      setShowForget(false);
+      qc.invalidateQueries({ queryKey: ['clusters'] });
+      push({ kind: 'success', title: 'Cluster forgotten', body: 'Configuration and Vault secrets removed.' });
+      nav({ to: '/clusters', replace: true });
+    },
+    onError: (err: unknown) =>
+      push({ kind: 'error', title: 'Could not forget cluster', body: errMessage(err, 'unknown') }),
   });
   const upgradeMut = useMutation({
     mutationFn: (k3sVersion: string) => upgradeCluster(clusterId, k3sVersion),
@@ -159,6 +172,12 @@ export function ClusterOverview() {
   actions.push({ key: 'sec-upgrade', dividerBefore: true, label: 'Upgrade', icon: <ArrowUpCircle size={14} />, onClick: () => setShowUpgrade(true) });
   if (status === 'ready' || status === 'degraded' || status === 'error') {
     actions.push({ key: 'destroy', destructive: true, label: 'Destroy', icon: <Trash2 size={14} />, onClick: () => setShowDestroy(true) });
+  }
+  // Forget mirrors the backend's deletableStatuses gate. After Destroy, the
+  // status flips to `destroyed` and this is the only way to clear the row off
+  // /clusters without hand-editing the DB.
+  if (status === 'pending' || status === 'initialized' || status === 'destroyed' || status === 'error') {
+    actions.push({ key: 'forget', destructive: true, label: 'Forget', icon: <Eraser size={14} />, onClick: () => setShowForget(true) });
   }
   actions.push({ key: 'kubeconfig', spacerBefore: true, small: true, label: 'kubeconfig', icon: <Download size={13} />, comingSoon: true });
   actions.push({
@@ -301,6 +320,14 @@ export function ClusterOverview() {
           clusterName={c.name}
           onClose={() => setShowDestroy(false)}
           onConfirm={() => { setShowDestroy(false); destroy.mutate(); }}
+        />
+      ) : null}
+      {showForget ? (
+        <ForgetClusterModal
+          clusterName={c.name}
+          onClose={() => setShowForget(false)}
+          onConfirm={() => forget.mutate()}
+          pending={forget.isPending}
         />
       ) : null}
       {showUpgrade ? (

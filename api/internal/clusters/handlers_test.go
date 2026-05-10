@@ -129,3 +129,63 @@ func withChiURLParam(r *http.Request, key, value string) *http.Request {
 	rctx.URLParams.Add(key, value)
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 }
+
+func TestDeleteRemovesRowWhenStatusDeletable(t *testing.T) {
+	s := newTestStore(t)
+	reg := newTestRegistry()
+	h := clusters.NewHandler(s, reg, nil)
+
+	c := &store.Cluster{ID: "delcluster", Name: "del-foo", Profile: "homelab", Status: "destroyed"}
+	if err := s.CreateCluster(context.Background(), c); err != nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+
+	req := httptest.NewRequest("DELETE", "/api/clusters/"+c.ID, nil)
+	req = withChiURLParam(req, "id", c.ID)
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+
+	if _, err := s.GetCluster(context.Background(), c.ID); err == nil {
+		t.Fatal("expected cluster row gone, still present")
+	}
+}
+
+func TestDeleteRejectsLiveStatusWith409(t *testing.T) {
+	s := newTestStore(t)
+	reg := newTestRegistry()
+	h := clusters.NewHandler(s, reg, nil)
+
+	c := &store.Cluster{ID: "live", Name: "live-foo", Profile: "homelab", Status: "ready"}
+	if err := s.CreateCluster(context.Background(), c); err != nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+
+	req := httptest.NewRequest("DELETE", "/api/clusters/"+c.ID, nil)
+	req = withChiURLParam(req, "id", c.ID)
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+	// Row must still be there — guard rejected the delete.
+	if _, err := s.GetCluster(context.Background(), c.ID); err != nil {
+		t.Fatalf("cluster row should still exist after 409, got %v", err)
+	}
+}
+
+func TestDeleteMissingReturns404(t *testing.T) {
+	s := newTestStore(t)
+	reg := newTestRegistry()
+	h := clusters.NewHandler(s, reg, nil)
+
+	req := httptest.NewRequest("DELETE", "/api/clusters/nope", nil)
+	req = withChiURLParam(req, "id", "nope")
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+}
