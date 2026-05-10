@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Server, Rocket, ArrowUpCircle, Trash2, Download, Box, RefreshCw, ChevronRight, Eraser } from 'lucide-react';
+import { Server, Rocket, ArrowUpCircle, Trash2, Download, Box, RefreshCw, ChevronRight, Eraser, SquarePen } from 'lucide-react';
 import { getCluster, destroyCluster, deleteCluster, listClusterDeployments, listProfiles, listNodes, retrieveKubeconfig, upgradeCluster, getJoinToken, retrieveJoinToken, api, type Deployment , errMessage } from '@/lib/api';
 import { StatusBadge, type ClusterStatus } from '@/components/StatusBadge';
 import { ActionBar, type Action } from '@/components/ActionRail';
@@ -172,6 +172,16 @@ export function ClusterOverview() {
   actions.push({ key: 'sec-upgrade', dividerBefore: true, label: 'Upgrade', icon: <ArrowUpCircle size={14} />, onClick: () => setShowUpgrade(true) });
   if (status === 'ready' || status === 'degraded' || status === 'error') {
     actions.push({ key: 'destroy', destructive: true, label: 'Destroy', icon: <Trash2 size={14} />, onClick: () => setShowDestroy(true) });
+  }
+  // Edit configuration mirrors the backend state machine: Initialized,
+  // Destroyed, and Error all permit re-init. Live states (deploying, ready,
+  // upgrading, destroying, degraded) intentionally don't — destroy first
+  // to change config of a running cluster.
+  if (status === 'initialized' || status === 'destroyed' || status === 'error') {
+    actions.push({
+      key: 'edit-config', label: 'Edit config', icon: <SquarePen size={14} />,
+      href: { to: '/clusters/$clusterId/initialize', params: { clusterId } },
+    });
   }
   // Forget mirrors the backend's deletableStatuses gate. After Destroy, the
   // status flips to `destroyed` and this is the only way to clear the row off

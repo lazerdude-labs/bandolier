@@ -304,6 +304,52 @@ export type ProxmoxTestRequest = {
 export const testProxmox = (req: ProxmoxTestRequest) =>
   api<ProxmoxTestResult>('POST', '/api/proxmox/test', req);
 
+// Sanitised view of a cluster's initialize values for the Edit Configuration
+// flow. Sensitive fields (token_secret, password, private_key, tsig_secret)
+// are NEVER returned by the backend — `secrets_present` lists which secret
+// fields exist in Vault so the wizard can render "Leave blank to keep
+// existing" hints next to those inputs.
+export type InitializeView = {
+  proxmox: {
+    endpoint: string;
+    token_id: string;
+    node: string;
+    storage: string;
+    username: string;
+    image_storage: string;
+    snippets_storage: string;
+    distro: string;
+    custom_url: string;
+    custom_sha256: string;
+    ca_bundle: string;
+  };
+  network: {
+    cidr: string;
+    gateway: string;
+    dns: string[];
+    fqdn: string;
+    master_ip: string;
+    agent1_ip: string;
+    agent2_ip: string;
+    vlan: number;
+    bridge_name: string;
+    traefik_dashboard: boolean | null;
+    dns_server: string;
+    dns_zone: string;
+    tsig_name: string;
+  };
+  ssh: {
+    public_key: string;
+    byo: boolean;
+  };
+  // Possible entries: "proxmox.token_secret", "proxmox.password",
+  // "ssh.private_key", "network.tsig_secret".
+  secrets_present: string[];
+};
+
+export const getClusterInit = (clusterID: string) =>
+  api<InitializeView>('GET', `/api/clusters/${clusterID}/initialize`);
+
 export const listCatalog = (clusterID: string) =>
   api<CatalogEntry[]>('GET', `/api/clusters/${clusterID}/apps/catalog`);
 export const listReleases = (clusterID: string) =>

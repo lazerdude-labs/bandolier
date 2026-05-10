@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { useForm, FormProvider, useFormContext } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowLeft, ArrowRight, Save, ChevronRight, ChevronDown, Check as CheckIcon, X as XIcon, Loader2 } from 'lucide-react';
@@ -6,6 +6,20 @@ import { initializeSchema, type InitializeInput } from '@/schemas/initialize';
 import { listDistros, testProxmox, errMessage, type Distro, type ProxmoxTestResult } from '@/lib/api';
 import { Stepper } from './Stepper';
 import { LiveSummary, type SummarySection } from './LiveSummary';
+
+// EditModeContext lets step components render "Leave blank to keep existing"
+// hints next to fields whose Vault values are present but not echoed in the
+// API response (token_secret, password, private_key, tsig_secret). Default
+// always-false; only edit-mode submissions populate it.
+const EditModeContext = createContext<{ isSecretPresent: (path: string) => boolean }>({
+  isSecretPresent: () => false,
+});
+
+function KeepBlankHint({ path }: { path: string }) {
+  const { isSecretPresent } = useContext(EditModeContext);
+  if (!isSecretPresent(path)) return null;
+  return <span className="field-hint">Leave blank to keep the existing value.</span>;
+}
 
 const homelabDefaults: Partial<InitializeInput> = {
   proxmox: {
@@ -60,14 +74,31 @@ const stepFields: Array<string[]> = [
   ['ssh.public_key', 'ssh.private_key'],
 ];
 
-export function InitializeForm({ onSubmit }: { onSubmit: (v: InitializeInput) => Promise<void> }) {
+export function InitializeForm({
+  onSubmit,
+  initialValues,
+  secretsPresent,
+}: {
+  onSubmit: (v: InitializeInput) => Promise<void>;
+  initialValues?: Partial<InitializeInput>;
+  secretsPresent?: string[];
+}) {
   const [currentStep, setCurrentStep] = useState(0);
+  // When initialValues are supplied (edit-mode), use them as defaults
+  // instead of the homelab fixture. Spreading homelabDefaults under is a
+  // safety net for any field the backend forgot to surface.
+  const defaults: InitializeInput = (initialValues
+    ? { ...homelabDefaults, ...initialValues, proxmox: { ...homelabDefaults.proxmox, ...initialValues.proxmox }, network: { ...homelabDefaults.network, ...initialValues.network }, ssh: { ...homelabDefaults.ssh, ...initialValues.ssh } }
+    : homelabDefaults) as InitializeInput;
   const methods = useForm<InitializeInput>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(initializeSchema) as any,
-    defaultValues: homelabDefaults as InitializeInput,
+    defaultValues: defaults,
     mode: 'onTouched',
   });
+  const secretsKeptOpen = secretsPresent ?? [];
+  const isSecretPresent = (path: string) => secretsKeptOpen.includes(path);
+  const editCtx = { isSecretPresent };
 
   const goNext = async () => {
     const fields = stepFields[currentStep];
@@ -88,6 +119,7 @@ export function InitializeForm({ onSubmit }: { onSubmit: (v: InitializeInput) =>
   const summary = buildSummary(watched);
 
   return (
+    <EditModeContext.Provider value={editCtx}>
     <FormProvider {...methods}>
       <form onSubmit={handleSubmit}>
         <div className="grid gap-6" style={{ gridTemplateColumns: '240px 1fr 320px', alignItems: 'start' }}>
@@ -149,6 +181,7 @@ export function InitializeForm({ onSubmit }: { onSubmit: (v: InitializeInput) =>
         </div>
       </form>
     </FormProvider>
+    </EditModeContext.Provider>
   );
 }
 
@@ -249,6 +282,7 @@ function ProxmoxStep() {
         <label className="field-label">API token secret</label>
         <input type="password" className="input mono" {...register('proxmox.token_secret')} />
         <span className="field-hint">Stored at <code>vault://clusters/&lt;id&gt;/proxmox</code>.</span>
+        <KeepBlankHint path="proxmox.token_secret" />
         {err?.token_secret ? <span className="field-error">{String(err.token_secret.message)}</span> : null}
       </div>
       <div className="form-grid">
@@ -260,6 +294,7 @@ function ProxmoxStep() {
         <div className="field">
           <label className="field-label">SSH password</label>
           <input type="password" className="input mono" {...register('proxmox.password')} />
+          <KeepBlankHint path="proxmox.password" />
           {err?.password ? <span className="field-error">{String(err.password.message)}</span> : null}
         </div>
       </div>
@@ -552,6 +587,7 @@ function NetworkStep() {
             <label className="field-label">TSIG secret</label>
             <input type="password" className="input mono" {...register('network.tsig_secret')} />
             <span className="field-hint">HMAC-SHA256 secret for nsupdate. Stored encrypted in Vault.</span>
+            <KeepBlankHint path="network.tsig_secret" />
           </div>
         </>
       ) : null}
@@ -578,6 +614,7 @@ function SshStep() {
         <label className="field-label">Private key (optional)</label>
         <textarea className="input mono" rows={6} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." {...register('ssh.private_key')} />
         <span className="field-hint">Stored at <code>vault://clusters/&lt;id&gt;/ssh</code>. Both blank → Bandolier generates.</span>
+        <KeepBlankHint path="ssh.private_key" />
       </div>
       {err?.message ? <span className="field-error">{String(err.message)}</span> : null}
     </>

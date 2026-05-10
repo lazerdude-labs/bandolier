@@ -104,6 +104,42 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
+
+	// Edit-mode merge: when the cluster has already been initialized at
+	// least once (Initialized / Destroyed / Error states all permit re-
+	// init via the state machine), the wizard ships empty strings for
+	// secret fields the operator chose not to change. Backfill those
+	// from the existing Vault values BEFORE the required-fields gate so
+	// edit submissions don't have to round-trip secrets through the
+	// browser.
+	isEdit := Status(c.Status) != StatusPending
+	if isEdit {
+		if existing, err := i.vault.Get(r.Context(), i.paths.Proxmox(id)); err == nil {
+			if req.Proxmox.TokenSecret == "" {
+				req.Proxmox.TokenSecret = stringFrom(existing, "token_secret")
+			}
+			if req.Proxmox.Password == "" {
+				req.Proxmox.Password = stringFrom(existing, "password")
+			}
+		}
+		if existing, err := i.vault.Get(r.Context(), i.paths.Network(id)); err == nil {
+			if req.Network.TSIGSecret == "" {
+				req.Network.TSIGSecret = stringFrom(existing, "tsig_secret")
+			}
+		}
+		if existing, err := i.vault.Get(r.Context(), i.paths.SSH(id)); err == nil {
+			// Edit + both keys blank → operator wants to keep the existing
+			// keypair. Without this fall-through the SSH validation path
+			// below would auto-gen a fresh keypair on every edit, churning
+			// the on-disk authorized_keys for any deployed VMs (which we
+			// only re-touch on next deploy, but still — surprising).
+			if req.SSH.PublicKey == "" && req.SSH.PrivateKey == "" {
+				req.SSH.PublicKey = stringFrom(existing, "public_key")
+				req.SSH.PrivateKey = stringFrom(existing, "private_key")
+			}
+		}
+	}
+
 	if req.Proxmox.Endpoint == "" || req.Proxmox.TokenID == "" || req.Proxmox.TokenSecret == "" ||
 		req.Proxmox.Username == "" || req.Proxmox.Password == "" ||
 		req.Network.MasterIP == "" || req.Network.Agent1IP == "" || req.Network.Agent2IP == "" ||
