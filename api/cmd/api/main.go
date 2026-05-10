@@ -29,10 +29,9 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	dbPath := os.Getenv("BANDOLIER_DB_PATH")
-	if dbPath == "" {
-		dbPath = "/var/lib/bandolier/app.db"
-	}
+	dbPath := envWithDefault("BANDOLIER_DB_PATH", "/var/lib/bandolier/app.db")
+	tfStateRoot := envWithDefault("BANDOLIER_TF_STATE_ROOT", "/var/lib/bandolier/tf-state")
+	logRoot := envWithDefault("BANDOLIER_LOG_ROOT", "/var/lib/bandolier/logs")
 	if err := os.MkdirAll(dirOf(dbPath), 0o755); err != nil {
 		logger.Error("mkdir db", "err", err)
 		os.Exit(1)
@@ -48,14 +47,8 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
-	addr := os.Getenv("BANDOLIER_VAULT_ADDR")
-	if addr == "" {
-		addr = "http://vault:8200"
-	}
-	approlePath := os.Getenv("BANDOLIER_VAULT_APPROLE_PATH")
-	if approlePath == "" {
-		approlePath = "/vault-init-state/approle.json"
-	}
+	addr := envWithDefault("BANDOLIER_VAULT_ADDR", "http://vault:8200")
+	approlePath := envWithDefault("BANDOLIER_VAULT_APPROLE_PATH", "/vault-init-state/approle.json")
 
 	vaultCli, loginSecret, approleCreds, err := vaultpkg.LoginAppRole(ctx, addr, approlePath)
 	if err != nil {
@@ -110,8 +103,8 @@ func main() {
 		Hub:          hub,
 		Mutex:        mu,
 		Registry:     registry,
-		TfStateRoot:  "/var/lib/bandolier/tf-state",
-		LogRoot:      "/var/lib/bandolier/logs",
+		TfStateRoot:  tfStateRoot,
+		LogRoot:      logRoot,
 		TerraformBin: "terraform",
 		AnsibleBin:   "ansible-runner",
 	}
@@ -140,7 +133,7 @@ func main() {
 		Mutex:   mu,
 		Helm:    helmFactory,
 		Vault:   vaultClient,
-		LogRoot: "/var/lib/bandolier/logs",
+		LogRoot: logRoot,
 	}
 	appsHandler := apps.NewHandler(appsStore, appsCatalog, helmFactory)
 	appsRepos := apps.NewRepoHandler(appsStore, st, appsCatalog, helmFactory)
@@ -184,7 +177,13 @@ func main() {
 	go clusters.RenewLoop(context.Background(), st, vaultClient, renewalHelmAdapter{inner: helmFactory}, auditWriter)
 
 	go func() {
-		logger.Info("api listening", "addr", srv.Addr, "db", dbPath, "vault", addr)
+		logger.Info("api listening",
+			"addr", srv.Addr,
+			"db", dbPath,
+			"vault", addr,
+			"tf_state_root", tfStateRoot,
+			"log_root", logRoot,
+		)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("listen failed", "err", err)
 			os.Exit(1)
@@ -239,4 +238,15 @@ func dirOf(p string) string {
 		}
 	}
 	return "."
+}
+
+// envWithDefault returns os.Getenv(name) when set and non-empty, otherwise
+// def. Single-source pattern for the BANDOLIER_* runtime overrides so a new
+// override never gets added without a default fallback (and the next reader
+// finds them all the same way).
+func envWithDefault(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
 }

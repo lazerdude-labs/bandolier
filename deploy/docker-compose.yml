@@ -59,6 +59,8 @@ services:
       BANDOLIER_VAULT_APPROLE_PATH: /vault-init-state/approle.json
       BANDOLIER_TERRAFORM_DIR: /opt/bandolier/terraform
       BANDOLIER_ANSIBLE_DIR: /opt/bandolier/ansible
+      BANDOLIER_TF_STATE_ROOT: /var/lib/bandolier/tf-state
+      BANDOLIER_LOG_ROOT: /var/lib/bandolier/logs
     volumes:
       - app-data:/var/lib/bandolier
       - tf-state:/var/lib/bandolier/tf-state
