@@ -71,6 +71,11 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	uid, _ := auth.UserIDFromContext(r.Context())
 
+	if !isValidClusterID(id) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		return
+	}
+
 	c, err := i.store.GetCluster(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -112,32 +117,64 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 	// from the existing Vault values BEFORE the required-fields gate so
 	// edit submissions don't have to round-trip secrets through the
 	// browser.
+	//
+	// On Vault transient errors here we return 503 — silently skipping
+	// would surface as a misleading "missing required fields" 400 (the
+	// operator's blanks would not be backfilled), and worse, the SSH
+	// "both blank" path would trigger auto-gen and churn the cluster's
+	// authorized_keys.
 	isEdit := Status(c.Status) != StatusPending
 	if isEdit {
-		if existing, err := i.vault.Get(r.Context(), i.paths.Proxmox(id)); err == nil {
-			if req.Proxmox.TokenSecret == "" {
-				req.Proxmox.TokenSecret = stringFrom(existing, "token_secret")
-			}
-			if req.Proxmox.Password == "" {
-				req.Proxmox.Password = stringFrom(existing, "password")
-			}
+		existingProx, err := i.vault.Get(r.Context(), i.paths.Proxmox(id))
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault unavailable (proxmox merge): " + err.Error()})
+			return
 		}
-		if existing, err := i.vault.Get(r.Context(), i.paths.Network(id)); err == nil {
+		if req.Proxmox.TokenSecret == "" {
+			req.Proxmox.TokenSecret = stringFrom(existingProx, "token_secret")
+		}
+		if req.Proxmox.Password == "" {
+			req.Proxmox.Password = stringFrom(existingProx, "password")
+		}
+		// TSIG secret lives under i.paths.DNS, not Network. Path may not
+		// exist if the operator originally opted out of managed DNS;
+		// treat absence (Get error) as "no existing secret" rather than
+		// a transient failure.
+		if existingDNS, err := i.vault.Get(r.Context(), i.paths.DNS(id)); err == nil {
 			if req.Network.TSIGSecret == "" {
-				req.Network.TSIGSecret = stringFrom(existing, "tsig_secret")
+				req.Network.TSIGSecret = stringFrom(existingDNS, "tsig_secret")
 			}
 		}
-		if existing, err := i.vault.Get(r.Context(), i.paths.SSH(id)); err == nil {
-			// Edit + both keys blank → operator wants to keep the existing
-			// keypair. Without this fall-through the SSH validation path
-			// below would auto-gen a fresh keypair on every edit, churning
-			// the on-disk authorized_keys for any deployed VMs (which we
-			// only re-touch on next deploy, but still — surprising).
-			if req.SSH.PublicKey == "" && req.SSH.PrivateKey == "" {
-				req.SSH.PublicKey = stringFrom(existing, "public_key")
-				req.SSH.PrivateKey = stringFrom(existing, "private_key")
-			}
+		existingSSH, err := i.vault.Get(r.Context(), i.paths.SSH(id))
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "vault unavailable (ssh merge): " + err.Error()})
+			return
 		}
+		// Edit + both keys blank → operator wants to keep the existing
+		// keypair. Without this fall-through the SSH validation path
+		// below would auto-gen a fresh keypair on every edit, churning
+		// the cluster's authorized_keys.
+		if req.SSH.PublicKey == "" && req.SSH.PrivateKey == "" {
+			req.SSH.PublicKey = stringFrom(existingSSH, "public_key")
+			req.SSH.PrivateKey = stringFrom(existingSSH, "private_key")
+		}
+	}
+
+	// SSH partial-key validation before any state writes — purely
+	// client-input validation, shouldn't flip the cluster from
+	// Initialized → Initializing → Error for a typo.
+	if (req.SSH.PublicKey == "") != (req.SSH.PrivateKey == "") {
+		_, _ = audit.Write(r.Context(), i.store, audit.Entry{
+			ActorID: uid,
+			Action:  string(audit.ActionClusterInit),
+			Target:  id,
+			Outcome: audit.OutcomeFailure,
+			Details: map[string]any{"reason": "ssh_byo_partial"},
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "ssh: provide both public + private key, or neither (for auto-gen)",
+		})
+		return
 	}
 
 	if req.Proxmox.Endpoint == "" || req.Proxmox.TokenID == "" || req.Proxmox.TokenSecret == "" ||
@@ -183,17 +220,14 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 
 	_ = i.store.UpdateClusterStatus(r.Context(), id, string(StatusInitializing))
 
-	// SSH key: operator may paste their own keypair (BYO mode), or leave both
-	// blank to have Bandolier generate. One blank + one set is rejected.
+	// SSH key: operator may paste their own keypair (BYO mode), or leave
+	// both blank to have Bandolier generate. The partial-key case is
+	// rejected above before the status flip.
 	sshPub := req.SSH.PublicKey
 	sshPriv := req.SSH.PrivateKey
-	byo := false
-	switch {
-	case sshPub != "" && sshPriv != "":
-		// BYO — use what operator pasted, skip keygen
-		byo = true
-	case sshPub == "" && sshPriv == "":
-		// Auto-gen
+	byo := sshPub != "" && sshPriv != ""
+	if !byo {
+		// Both blank → auto-gen.
 		p, k, err := generateSSHKey()
 		if err != nil {
 			_ = i.store.UpdateClusterStatus(r.Context(), id, string(StatusError))
@@ -209,19 +243,6 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 		sshPub = p
 		sshPriv = k
-	default:
-		_ = i.store.UpdateClusterStatus(r.Context(), id, string(StatusError))
-		_, _ = audit.Write(r.Context(), i.store, audit.Entry{
-			ActorID: uid,
-			Action:  string(audit.ActionClusterInit),
-			Target:  id,
-			Outcome: audit.OutcomeFailure,
-			Details: map[string]any{"reason": "ssh_byo_partial"},
-		})
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "ssh: provide both public + private key, or neither (for auto-gen)",
-		})
-		return
 	}
 
 	if err := i.vault.Put(r.Context(), i.paths.Proxmox(id), map[string]any{

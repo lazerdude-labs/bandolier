@@ -64,6 +64,11 @@ type initializeView struct {
 func (i *Initializer) HandleGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
+	if !isValidClusterID(id) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		return
+	}
+
 	c, err := i.store.GetCluster(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -93,6 +98,12 @@ func (i *Initializer) HandleGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "vault ssh: " + err.Error()})
 		return
 	}
+	// DNS lives at clusters/<id>/dns, with keys `server`, `zone`,
+	// `tsig_name`, `tsig_secret` — separate from the network path. The
+	// path may not exist (operator opted out of managed DNS), so a Get
+	// error here doesn't fail the response; the wizard will render the
+	// manage_dns toggle as off and the four DNS fields as blank.
+	dnsCfg, _ := i.vault.Get(r.Context(), i.paths.DNS(id))
 
 	var v initializeView
 	v.Proxmox.Endpoint = stringFrom(prox, "endpoint")
@@ -119,9 +130,12 @@ func (i *Initializer) HandleGet(w http.ResponseWriter, r *http.Request) {
 	if td, ok := net["traefik_dashboard"].(bool); ok {
 		v.Network.TraefikDashboard = &td
 	}
-	v.Network.DNSServer = stringFrom(net, "dns_server")
-	v.Network.DNSZone = stringFrom(net, "dns_zone")
-	v.Network.TSIGName = stringFrom(net, "tsig_name")
+	// DNS keys live in their own Vault path (i.paths.DNS) and are stored
+	// without the `dns_` prefix the wizard's form uses ("server", "zone",
+	// "tsig_name") — translate at read time.
+	v.Network.DNSServer = stringFrom(dnsCfg, "server")
+	v.Network.DNSZone = stringFrom(dnsCfg, "zone")
+	v.Network.TSIGName = stringFrom(dnsCfg, "tsig_name")
 
 	v.SSH.PublicKey = stringFrom(sshCfg, "public_key")
 	if byo, ok := sshCfg["byo"].(bool); ok {
@@ -134,7 +148,7 @@ func (i *Initializer) HandleGet(w http.ResponseWriter, r *http.Request) {
 	if stringFrom(prox, "password") != "" {
 		v.SecretsPresent = append(v.SecretsPresent, "proxmox.password")
 	}
-	if stringFrom(net, "tsig_secret") != "" {
+	if stringFrom(dnsCfg, "tsig_secret") != "" {
 		v.SecretsPresent = append(v.SecretsPresent, "network.tsig_secret")
 	}
 	if stringFrom(sshCfg, "private_key") != "" {

@@ -22,9 +22,11 @@ export function ClusterInitialize() {
     },
   });
 
-  const isEdit =
-    existing.data !== undefined &&
-    !(existing.error instanceof ApiError && existing.error.status === 404);
+  // Use isSuccess (terminal-state success) rather than `data !== undefined &&
+  // !error-is-404`. The latter has a brief window during background refetch
+  // where stale data + a fresh 404 error coexist, causing isEdit to flip
+  // false while initialValues are still passed in.
+  const isEdit = existing.isSuccess;
 
   const mut = useMutation({
     mutationFn: (v: InitializeInput) => api('POST', `/api/clusters/${clusterId}/initialize`, v),
@@ -65,8 +67,8 @@ export function ClusterInitialize() {
       ) : null}
       <InitializeForm
         onSubmit={async (v) => { await mut.mutateAsync(v); }}
-        initialValues={existing.data ? viewToInput(existing.data) : undefined}
-        secretsPresent={existing.data?.secrets_present ?? []}
+        initialValues={isEdit && existing.data ? viewToInput(existing.data) : undefined}
+        secretsPresent={isEdit ? (existing.data?.secrets_present ?? []) : []}
       />
     </div>
   );
