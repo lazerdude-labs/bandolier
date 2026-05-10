@@ -18,7 +18,7 @@ ARG TF_VERSION=1.7.5
 RUN cd /tmp && \
     curl -fsSLO "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" && \
     curl -fsSLO "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_SHA256SUMS" && \
-    grep "  terraform_${TF_VERSION}_linux_amd64.zip$" "terraform_${TF_VERSION}_SHA256SUMS" | sha256sum -c - && \
+    grep "  terraform_${TF_VERSION}_linux_amd64.zip\$" "terraform_${TF_VERSION}_SHA256SUMS" | sha256sum -c - && \
     unzip "terraform_${TF_VERSION}_linux_amd64.zip" -d /usr/local/bin && \
     rm "terraform_${TF_VERSION}_linux_amd64.zip" "terraform_${TF_VERSION}_SHA256SUMS"
 
