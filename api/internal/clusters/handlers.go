@@ -311,3 +311,113 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// deletableStatuses gates Delete to terminal/idle states only — never a live
+// cluster. `destroying`/`upgrading`/`deploying`/`initializing` would orphan
+// in-flight infra; `ready`/`degraded` should be destroyed first so terraform
+// state stays consistent with reality.
+var deletableStatuses = map[string]struct{}{
+	string(StatusPending):     {},
+	string(StatusInitialized): {},
+	string(StatusDestroyed):   {},
+	string(StatusError):       {},
+}
+
+// Delete removes a cluster's configuration row (and its CASCADE-linked
+// deployments / app rows / repo rows) plus best-effort cleanup of its Vault
+// secrets. Pure local-state operation — does not touch Proxmox or the VMs.
+// Caller must Destroy first if the cluster is ready/degraded.
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	uid, _ := auth.UserIDFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+
+	c, err := h.store.GetCluster(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		_, _ = audit.Write(r.Context(), h.store, audit.Entry{
+			ActorID: uid,
+			Action:  string(audit.ActionClusterDelete),
+			Target:  id,
+			Outcome: audit.OutcomeFailure,
+			Details: map[string]any{"reason": "not_found"},
+		})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if _, ok := deletableStatuses[c.Status]; !ok {
+		_, _ = audit.Write(r.Context(), h.store, audit.Entry{
+			ActorID: uid,
+			Action:  string(audit.ActionClusterDelete),
+			Target:  id,
+			Outcome: audit.OutcomeFailure,
+			Details: map[string]any{"reason": "invalid_status", "status": c.Status},
+		})
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "destroy the cluster before deleting its configuration",
+		})
+		return
+	}
+
+	// Best-effort Vault cleanup before the DB delete. If Vault is sealed or
+	// unreachable we still want the local row gone — operators can reconcile
+	// orphaned secrets later via vault CLI. Errors are recorded in audit
+	// details but don't block the delete.
+	vaultErrs := h.purgeVaultSecrets(r.Context(), id)
+
+	if err := h.store.DeleteCluster(r.Context(), id); err != nil {
+		_, _ = audit.Write(r.Context(), h.store, audit.Entry{
+			ActorID: uid,
+			Action:  string(audit.ActionClusterDelete),
+			Target:  id,
+			Outcome: audit.OutcomeFailure,
+			Details: map[string]any{"reason": "db_error", "error": err.Error()},
+		})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	details := map[string]any{"name": c.Name, "profile": c.Profile, "status_at_delete": c.Status}
+	if len(vaultErrs) > 0 {
+		details["vault_cleanup_errors"] = vaultErrs
+	}
+	_, _ = audit.Write(r.Context(), h.store, audit.Entry{
+		ActorID: uid,
+		Action:  string(audit.ActionClusterDelete),
+		Target:  id,
+		Outcome: audit.OutcomeSuccess,
+		Details: details,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// purgeVaultSecrets removes the per-cluster KV paths the rest of the codebase
+// writes to (paths.go). Returns a list of human-readable error strings — one
+// per path that failed — so the caller can surface them in audit details.
+func (h *Handler) purgeVaultSecrets(ctx context.Context, clusterID string) []string {
+	if h.vault == nil {
+		return nil
+	}
+	p := vault.Paths{}
+	paths := []string{
+		p.Proxmox(clusterID),
+		p.Network(clusterID),
+		p.SSH(clusterID),
+		p.K3sJoin(clusterID),
+		p.Kubeconfig(clusterID),
+		p.JoinToken(clusterID),
+		// Phase 4 wildcard cert metadata. Kept inline (not on Paths) to match
+		// readNetwork's hand-built path above.
+		"clusters/" + clusterID + "/wildcard_cert",
+	}
+	var errs []string
+	for _, path := range paths {
+		if err := h.vault.Delete(ctx, path); err != nil {
+			errs = append(errs, path+": "+err.Error())
+		}
+	}
+	return errs
+}

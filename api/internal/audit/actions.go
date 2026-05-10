@@ -13,6 +13,7 @@ const (
 	ActionClusterInit                Action = "cluster_initialize"
 	ActionClusterDeploy              Action = "cluster_deploy"
 	ActionClusterDestroy             Action = "cluster_destroy"
+	ActionClusterDelete              Action = "cluster_delete"
 	ActionClusterUpgrade             Action = "cluster_upgrade"
 	ActionClusterKubeconfigDownload  Action = "cluster_kubeconfig_download"
 	ActionClusterJoinTokenRetrieve   Action = "cluster_join_token_retrieve"

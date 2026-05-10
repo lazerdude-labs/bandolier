@@ -75,6 +75,22 @@ func (s *Store) UpdateClusterStatus(ctx context.Context, id, status string) erro
 	return nil
 }
 
+// DeleteCluster removes the cluster row. Schema FKs declare ON DELETE CASCADE
+// against clusters(id) for deployments / apps_repos / apps_installs, so those
+// rows go with it. Audit log rows are intentionally left intact (they target
+// the cluster id by string for after-the-fact accountability).
+func (s *Store) DeleteCluster(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM clusters WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListReadyClusters returns the IDs of all clusters in the `ready` state.
 // Used by the wildcard cert renewal goroutine to know which clusters to scan.
 func (s *Store) ListReadyClusters(ctx context.Context) ([]string, error) {

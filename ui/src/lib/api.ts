@@ -122,6 +122,7 @@ export const cancelDeployment = (deploymentID: string) =>
 export const deployCluster  = (clusterID: string) =>
   api<{ deployment_id: string }>('POST', `/api/clusters/${clusterID}/deploy`);
 export const destroyCluster  = (id: string) => api<{ deployment_id: string }>('POST', `/api/clusters/${id}/destroy`);
+export const deleteCluster   = (id: string) => api<void>('DELETE', `/api/clusters/${id}`);
 export const changePassword  = (current_password: string, new_password: string) =>
   api<void>('POST', '/api/auth/change-password', { current_password, new_password });
 

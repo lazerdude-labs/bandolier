@@ -92,6 +92,7 @@ func New(deps Deps) http.Handler {
 		pr.Post("/api/clusters", clusterH.Create)
 		pr.Get("/api/clusters", clusterH.List)
 		pr.Get("/api/clusters/{id}", clusterH.Get)
+		pr.Delete("/api/clusters/{id}", clusterH.Delete)
 
 		pr.Post("/api/clusters/{id}/destroy", clusters.NewDestroyHandler(deps.Store, deps.Executor).ServeHTTP)
 		pr.Post("/api/clusters/{id}/upgrade", clusters.NewUpgradeHandler(deps.Store, deps.Executor).ServeHTTP)
