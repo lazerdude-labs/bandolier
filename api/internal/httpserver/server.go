@@ -123,6 +123,11 @@ func New(deps Deps) http.Handler {
 
 		init := clusters.NewInitializer(deps.Store, deps.Vault)
 		pr.Post("/api/clusters/{id}/initialize", init.Handle)
+		// GET returns the current initialize values for re-edit. Sensitive
+		// fields are stripped; the response includes a `secrets_present`
+		// array so the wizard knows which fields can be left blank to keep
+		// existing values.
+		pr.Get("/api/clusters/{id}/initialize", init.HandleGet)
 		pr.Post("/api/clusters/{id}/dns/test",
 			clusters.NewDNSTestHandler(deps.Store, deps.Vault).ServeHTTP)
 		// Pre-save Proxmox credentials test for the wizard's "Test

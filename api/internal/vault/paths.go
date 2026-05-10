@@ -9,6 +9,8 @@ type Paths struct{}
 func (Paths) Proxmox(clusterID string) string { return fmt.Sprintf("clusters/%s/proxmox", clusterID) }
 func (Paths) Network(clusterID string) string { return fmt.Sprintf("clusters/%s/network", clusterID) }
 func (Paths) SSH(clusterID string) string     { return fmt.Sprintf("clusters/%s/ssh", clusterID) }
+func (Paths) DNS(clusterID string) string     { return fmt.Sprintf("clusters/%s/dns", clusterID) }
+func (Paths) TLS(clusterID string) string     { return fmt.Sprintf("clusters/%s/tls", clusterID) }
 func (Paths) K3sJoin(clusterID string) string { return fmt.Sprintf("clusters/%s/k3s", clusterID) }
 func (Paths) Kubeconfig(clusterID string) string {
 	return fmt.Sprintf("clusters/%s/kubeconfig", clusterID)

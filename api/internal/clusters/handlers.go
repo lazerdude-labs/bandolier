@@ -98,6 +98,27 @@ func newID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// isValidClusterID checks that the URL-supplied cluster ID matches the shape
+// newID() produces (32 lowercase hex chars). Defense in depth — the store
+// lookup that follows would already reject anything we didn't generate, but
+// rejecting at the handler boundary makes the invariant explicit and
+// prevents a future refactor that drops the store-first ordering from
+// silently letting `../auth/master`-style IDs reach Vault path templates.
+func isValidClusterID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		// De Morgan form of !(isDigit || isHexLower) so staticcheck's
+		// QF1001 stays quiet.
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	uid, _ := auth.UserIDFromContext(r.Context())
 
