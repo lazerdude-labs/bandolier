@@ -278,6 +278,32 @@ export type BundleInstallRequest = {
 
 export type DNSTestResult = { ok: boolean; error?: string };
 
+export type ProxmoxCheck = {
+  name: string;
+  label: string;
+  status: 'ok' | 'fail' | 'skip';
+  detail?: string;
+};
+
+export type ProxmoxTestResult = {
+  ok: boolean;
+  checks: ProxmoxCheck[];
+};
+
+export type ProxmoxTestRequest = {
+  endpoint: string;
+  token_id: string;
+  token_secret: string;
+  node: string;
+  storage: string;
+  image_storage: string;
+  snippets_storage: string;
+  ca_bundle?: string;
+};
+
+export const testProxmox = (req: ProxmoxTestRequest) =>
+  api<ProxmoxTestResult>('POST', '/api/proxmox/test', req);
+
 export const listCatalog = (clusterID: string) =>
   api<CatalogEntry[]>('GET', `/api/clusters/${clusterID}/apps/catalog`);
 export const listReleases = (clusterID: string) =>

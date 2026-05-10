@@ -125,6 +125,10 @@ func New(deps Deps) http.Handler {
 		pr.Post("/api/clusters/{id}/initialize", init.Handle)
 		pr.Post("/api/clusters/{id}/dns/test",
 			clusters.NewDNSTestHandler(deps.Store, deps.Vault).ServeHTTP)
+		// Pre-save Proxmox credentials test for the wizard's "Test
+		// reachability" button. No cluster ID required — the wizard's
+		// current form values are POSTed directly.
+		pr.Post("/api/proxmox/test", clusters.HandleProxmoxTest)
 
 		pr.Post("/api/clusters/{id}/deploy", dh.Deploy)
 		pr.Get("/api/clusters/{id}/deployments", dh.ListForCluster)

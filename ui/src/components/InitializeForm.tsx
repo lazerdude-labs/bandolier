@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useForm, FormProvider, useFormContext } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ArrowLeft, ArrowRight, Save, ChevronRight, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Save, ChevronRight, ChevronDown, Check as CheckIcon, X as XIcon, Loader2 } from 'lucide-react';
 import { initializeSchema, type InitializeInput } from '@/schemas/initialize';
-import { listDistros, type Distro } from '@/lib/api';
+import { listDistros, testProxmox, errMessage, type Distro, type ProxmoxTestResult } from '@/lib/api';
 import { Stepper } from './Stepper';
 import { LiveSummary, type SummarySection } from './LiveSummary';
 
@@ -355,14 +355,96 @@ function ProxmoxStep() {
           </span>
         </div>
       ) : null}
-      <div className="flex items-center gap-2 pt-2">
-        <span className="tt-wrap">
-          <button type="button" className="btn btn-outline btn-sm" disabled>Test reachability</button>
-          <span className="tt">Coming soon</span>
-        </span>
-        <span className="text-[11px] text-muted-foreground">Validates URL + token id/secret pair against the Proxmox API.</span>
-      </div>
+      <ProxmoxTestPanel />
     </>
+  );
+}
+
+// ProxmoxTestPanel posts the current Proxmox-step form values to
+// /api/proxmox/test and renders the per-check result list. Lives inside the
+// wizard so it can read live values via useFormContext without prop drilling.
+function ProxmoxTestPanel() {
+  const { getValues } = useFormContext<InitializeInput>();
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<ProxmoxTestResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const runTest = async () => {
+    setRunning(true);
+    setErr(null);
+    setResult(null);
+    try {
+      const v = getValues('proxmox');
+      const out = await testProxmox({
+        endpoint: v.endpoint,
+        token_id: v.token_id,
+        token_secret: v.token_secret,
+        node: v.node,
+        storage: v.storage,
+        image_storage: v.image_storage,
+        snippets_storage: v.snippets_storage,
+        ca_bundle: v.ca_bundle,
+      });
+      setResult(out);
+    } catch (e) {
+      setErr(errMessage(e, 'test request failed'));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="pt-2">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="btn btn-outline btn-sm"
+          onClick={runTest}
+          disabled={running}
+        >
+          {running ? <Loader2 size={12} className="animate-spin" /> : null}
+          {running ? 'Testing…' : 'Test reachability'}
+        </button>
+        <span className="text-[11px] text-muted-foreground">
+          Validates endpoint + token + node + each configured storage against the Proxmox API. Pre-save; nothing persists.
+        </span>
+      </div>
+      {err ? (
+        <div className="field-error mt-2">{err}</div>
+      ) : null}
+      {result ? (
+        <div className="mt-3 rounded border border-[hsl(var(--border))] bg-[hsl(var(--card-2))] p-3 space-y-2">
+          <div className="text-[12px] font-medium">
+            {result.ok ? (
+              <span className="flex items-center gap-1" style={{ color: 'hsl(158 70% 52%)' }}>
+                <CheckIcon size={14} /> All checks passed — ready to save.
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-destructive">
+                <XIcon size={14} /> {result.checks.filter((c) => c.status !== 'ok').length} check(s) failed.
+              </span>
+            )}
+          </div>
+          <ul className="space-y-1">
+            {result.checks.map((c) => (
+              <li key={c.name} className="text-[12px] flex items-start gap-2">
+                {c.status === 'ok' ? (
+                  <CheckIcon size={12} style={{ color: 'hsl(158 70% 52%)', marginTop: 3, flexShrink: 0 }} />
+                ) : (
+                  <XIcon size={12} className="text-destructive" style={{ marginTop: 3, flexShrink: 0 }} />
+                )}
+                <div className="flex-1">
+                  <div>{c.label}</div>
+                  {c.detail ? (
+                    <div className="text-[11px] text-muted-foreground font-mono">{c.detail}</div>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
