@@ -1,7 +1,50 @@
 #!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# Bandolier — CI / developer smoke test.
+#
+# THIS IS NOT THE FIRST-TIME INSTALL PATH. For a normal install, see the
+# README quick start: `cd deploy && docker compose up -d --build`.
+#
+# This script is destructive: the first thing it does is `docker compose
+# down -v`, which wipes every Bandolier volume on the host (vault state,
+# app database, terraform state, TLS certs). It then pre-fills the master
+# password to a fixed value (`smoke-test-pw`) so the rest of the script can
+# exercise the cluster create / deploy / destroy / redeploy / password-change
+# cycle without an operator at the keyboard.
+#
+# Required tools on the host: docker (with the Compose v2 plugin), curl, jq.
+# ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE/.."
+
+# Preflight: fail fast with a single clear message if any required tool is
+# missing. Without this, the script aborts mid-stream after the user has
+# already destroyed their volumes via `compose down -v`, and they miss the
+# how-to-access prompts at the end.
+check_deps() {
+  local missing=()
+  command -v docker >/dev/null 2>&1 || missing+=("docker")
+  # Only test the compose plugin when docker itself is present — otherwise we
+  # produce a misleading "install both" diagnostic in the case where the
+  # operator has the plugin but not docker.
+  if command -v docker >/dev/null 2>&1; then
+    docker compose version >/dev/null 2>&1 || missing+=("docker-compose-plugin (compose v2)")
+  fi
+  command -v curl >/dev/null 2>&1 || missing+=("curl")
+  command -v jq >/dev/null 2>&1 || missing+=("jq")
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "ERROR: missing required tools on host:" >&2
+    printf '  - %s\n' "${missing[@]}" >&2
+    echo "" >&2
+    echo "Install on Debian/Ubuntu: sudo apt-get install -y ${missing[*]/docker-compose-plugin (compose v2)/docker-compose-plugin}" >&2
+    echo "Install on Rocky/RHEL:    sudo dnf install -y ${missing[*]/docker-compose-plugin (compose v2)/docker-compose-plugin}" >&2
+    echo "" >&2
+    echo "Note: this is the smoke-test script. For first-time install, see README." >&2
+    exit 1
+  fi
+}
+check_deps
 
 echo "==> Bringing up stack..."
 docker compose down -v >/dev/null 2>&1 || true

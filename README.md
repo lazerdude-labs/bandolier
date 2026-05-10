@@ -17,12 +17,22 @@
 
 ```bash
 git clone https://github.com/lazerdude-labs/bandolier.git
-cd bandolier
-./deploy/scripts/smoke.sh
+cd bandolier/deploy
+docker compose up -d --build
 # Open https://127.0.0.1 in your browser; accept the self-signed cert.
+# You'll land on the setup screen — pick a master password (12+ chars).
 ```
 
-First-run setup asks for a master password. Subsequent visits log you straight into the cluster overview. The stack binds to `127.0.0.1:443` by default — loopback-only — so nothing is reachable from the LAN until you explicitly expose it.
+The first time you visit `https://127.0.0.1`, the UI lands on a setup screen and prompts you for a master password. After that, subsequent visits go straight to the cluster overview. The stack binds to `127.0.0.1:443` by default — loopback-only — so nothing is reachable from the LAN until you explicitly expose it.
+
+> **Don't use `deploy/scripts/smoke.sh` for first-time install.** That script is for CI: it wipes volumes, pre-fills a fixed master password (`smoke-test-pw`), and runs assertions for the deploy → destroy → redeploy → password-change cycle. Use `docker compose up -d --build` for a clean install.
+
+### Host requirements
+
+- Docker Engine 24+ with the Compose v2 plugin (`docker compose version`).
+- Outbound HTTPS to `releases.hashicorp.com`, `dl.k8s.io`, `get.helm.sh`, and `ghcr.io` (only during the first build; subsequent runs reuse the local image).
+- Network reachability to your Proxmox API (only when you actually deploy a cluster — not for the stack itself).
+- For running `deploy/scripts/smoke.sh` (CI/dev only): `jq`, `curl`, plus the above.
 
 ### What gets deployed
 
