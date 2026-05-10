@@ -318,6 +318,7 @@ export type InitializeView = {
     username: string;
     image_storage: string;
     snippets_storage: string;
+    image_pre_uploaded: boolean;
     distro: string;
     custom_url: string;
     custom_sha256: string;

@@ -264,6 +264,157 @@ func TestBuildTLSConfig_RejectsMalformedPEM(t *testing.T) {
 	}
 }
 
+func TestPermissionHint(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string // substring that must appear; "" means hint should be empty
+	}{
+		{
+			name: "storage path → suggests PVEDatastoreAdmin",
+			body: `Permission check failed (/storage/local-lvm, Datastore.Audit|Datastore.AllocateSpace)`,
+			want: "PVEDatastoreAdmin",
+		},
+		{
+			name: "storage path → includes pveum acl modify",
+			body: `Permission check failed (/storage/local, Datastore.Audit)`,
+			want: "pveum acl modify /storage/local",
+		},
+		{
+			name: "node path → suggests PVEAuditor for preflight",
+			body: `Permission check failed (/nodes/pve, Sys.Audit)`,
+			want: "PVEAuditor",
+		},
+		{
+			name: "node path → mentions PVEVMAdmin for deploy",
+			body: `Permission check failed (/nodes/pve, Sys.Audit)`,
+			want: "PVEVMAdmin",
+		},
+		{
+			name: "unrecognized path → still surfaces a generic hint",
+			body: `Permission check failed (/access/groups, Sys.Audit)`,
+			want: "/access/groups",
+		},
+		{
+			name: "non-permission body returns empty",
+			body: `{"errors":{"":"some other failure"}}`,
+			want: "",
+		},
+		{
+			// The captured `privs` group falls outside permPrivRe — must not
+			// be reflected. Defends against a Proxmox-or-MITM emitting a
+			// crafted body that injects a misleading pveum command into the
+			// hint that the operator might copy-paste.
+			name: "shell-injection-in-privs is rejected",
+			body: "Permission check failed (/storage/local, X; rm -rf /)",
+			want: "",
+		},
+		{
+			// Captured `path` outside permPathRe (contains spaces) — reject.
+			name: "weird path is rejected",
+			body: "Permission check failed (/storage/local with spaces, Datastore.Audit)",
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := permissionHint(tc.body)
+			if tc.want == "" {
+				if got != "" {
+					t.Errorf("expected empty hint, got %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("expected hint to contain %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+// TestRunTests_PermissionDeniedSurfacesFix wires a fake Proxmox that returns
+// the real-world 403 body the bpg provider/Proxmox spits out when the token
+// lacks Datastore.Audit on a storage. The detail should mention the role
+// fix, not the raw permission body.
+func TestRunTests_PermissionDeniedSurfacesFix(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/version" {
+			_, _ = w.Write([]byte(`{"data":{"version":"8.2.4","release":"8.2"}}`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api2/json/nodes/pve/storage/") {
+			http.Error(w, `Permission check failed (/storage/local-lvm, Datastore.Audit|Datastore.AllocateSpace)`, http.StatusForbidden)
+			return
+		}
+		// Node /status: pretend ok so we reach storage checks.
+		if strings.HasSuffix(r.URL.Path, "/status") {
+			_, _ = w.Write([]byte(`{"data":{"node":"pve"}}`))
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	got := RunTests(context.Background(), TestRequest{
+		Endpoint:        srv.URL,
+		TokenID:         "root@pam!t",
+		TokenSecret:     "any",
+		Node:            "pve",
+		Storage:         "local-lvm",
+		ImageStorage:    "local",
+		SnippetsStorage: "cephfs",
+	})
+	if got.OK {
+		t.Fatal("expected OK=false")
+	}
+	var storage *Check
+	for i := range got.Checks {
+		if got.Checks[i].Name == "vm_disk_storage" {
+			storage = &got.Checks[i]
+		}
+	}
+	if storage == nil {
+		t.Fatal("vm_disk_storage check missing")
+	}
+	if !strings.Contains(storage.Detail, "PVEDatastoreAdmin") {
+		t.Errorf("expected PVEDatastoreAdmin role in detail, got %q", storage.Detail)
+	}
+	if !strings.Contains(storage.Detail, "pveum acl modify /storage/local-lvm") {
+		t.Errorf("expected pveum acl modify command in detail, got %q", storage.Detail)
+	}
+}
+
+// TestRunTests_401_DoesNotSuggestACLFix wires a fake Proxmox that returns
+// a 401 with a body that happens to also mention "Permission check failed".
+// 401 = bad token (wrong/expired/revoked); a permission-hint that suggests
+// `pveum acl modify` would actively misdirect the operator. The detail
+// must NOT recommend a role grant in this case.
+func TestRunTests_401_DoesNotSuggestACLFix(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return 401 even on /version so RunTests fails on the auth check.
+		http.Error(w, `{"errors":{"":"invalid token"}} Permission check failed (/storage/local, Datastore.Audit)`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+	got := RunTests(context.Background(), TestRequest{
+		Endpoint:        srv.URL,
+		TokenID:         "root@pam!t",
+		TokenSecret:     "any",
+		Node:            "pve",
+		Storage:         "local-lvm",
+		ImageStorage:    "local",
+		SnippetsStorage: "cephfs",
+	})
+	if got.OK {
+		t.Fatal("expected OK=false on 401")
+	}
+	if !strings.Contains(got.Checks[0].Detail, "401") {
+		t.Errorf("expected detail to flag 401, got %q", got.Checks[0].Detail)
+	}
+	if strings.Contains(got.Checks[0].Detail, "pveum acl modify") {
+		t.Errorf("401 detail must not suggest pveum acl fix; got %q", got.Checks[0].Detail)
+	}
+}
+
 func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)

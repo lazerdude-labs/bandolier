@@ -76,6 +76,12 @@ variable "proxmox_image_storage" {
   default     = "local"
 }
 
+variable "proxmox_image_pre_uploaded" {
+  description = "When true, terraform skips the cloud-image download and references an existing file at <proxmox_image_storage>:iso/<proxmox_image_filename>. Workaround for upstream CDN HEAD-blocks (e.g. Rocky's dl.rockylinux.org filtering Proxmox's User-Agent) — operator pre-uploads via `scp` and Bandolier never fetches."
+  type        = bool
+  default     = false
+}
+
 variable "proxmox_snippets_storage" {
   description = "Proxmox storage pool (with 'snippets' content type) where per-VM cloud-init configs are uploaded. Must have 'snippets' enabled in `pvesm set <storage> --content ...,snippets`."
   type        = string

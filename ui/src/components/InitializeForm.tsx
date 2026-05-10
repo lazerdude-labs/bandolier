@@ -33,6 +33,7 @@ const homelabDefaults: Partial<InitializeInput> = {
     ca_bundle: '',
     image_storage: 'local',
     snippets_storage: 'local',
+    image_pre_uploaded: false,
     distro: 'rocky9',
     custom_url: '',
     custom_sha256: '',
@@ -68,7 +69,7 @@ const steps = [
 
 // Field paths used by react-hook-form trigger() for per-step validation.
 const stepFields: Array<string[]> = [
-  ['proxmox.endpoint', 'proxmox.token_id', 'proxmox.token_secret', 'proxmox.node', 'proxmox.storage', 'proxmox.username', 'proxmox.password', 'proxmox.image_storage', 'proxmox.snippets_storage', 'proxmox.distro', 'proxmox.custom_url', 'proxmox.custom_sha256'],
+  ['proxmox.endpoint', 'proxmox.token_id', 'proxmox.token_secret', 'proxmox.node', 'proxmox.storage', 'proxmox.username', 'proxmox.password', 'proxmox.image_storage', 'proxmox.snippets_storage', 'proxmox.image_pre_uploaded', 'proxmox.distro', 'proxmox.custom_url', 'proxmox.custom_sha256'],
   ['network.cidr', 'network.gateway', 'network.dns', 'network.fqdn', 'network.master_ip', 'network.agent1_ip', 'network.agent2_ip', 'network.vlan', 'network.bridge_name', 'network.dns_server', 'network.dns_zone', 'network.tsig_name', 'network.tsig_secret'],
   // SSH step: optional BYO keypair. Schema enforces both-or-neither.
   ['ssh.public_key', 'ssh.private_key'],
@@ -223,7 +224,7 @@ function buildSummary(v: Partial<InitializeInput>): SummarySection[] {
         { label: 'Secret',   value: v.proxmox?.token_secret ? 'set' : '' },
         { label: 'Image storage', value: v.proxmox?.image_storage || 'local' },
         { label: 'Snippets storage', value: v.proxmox?.snippets_storage || 'local' },
-        { label: 'Image source',  value: v.proxmox?.distro || (v.proxmox?.custom_url ? 'custom URL' : '—'), mono: false },
+        { label: 'Image source',  value: v.proxmox?.image_pre_uploaded ? 'pre-uploaded' : (v.proxmox?.distro || (v.proxmox?.custom_url ? 'custom URL' : '—')), mono: false },
       ],
     },
     {
@@ -309,6 +310,18 @@ function ProxmoxStep() {
           <input className="input mono" placeholder="local" {...register('proxmox.snippets_storage')} />
           <span className="field-hint">Storage pool with 'snippets' content type. Default: 'local'. Enable with <code>pvesm set &lt;storage&gt; --content ...,snippets</code> if needed.</span>
         </div>
+      </div>
+      <div className="field">
+        <label className="flex items-center gap-2 text-[13px]">
+          <input type="checkbox" {...register('proxmox.image_pre_uploaded')} />
+          <span>Image already uploaded to Proxmox (skip download)</span>
+        </label>
+        <span className="field-hint">
+          Check this if you've manually <code>scp</code>'d the cloud image to <code>&lt;image storage&gt;:iso/</code> with the catalog filename. Workaround for upstream CDN HEAD-blocks (e.g. Rocky's <code>dl.rockylinux.org</code> filtering Proxmox's User-Agent). Filename must match the selected distro — for Rocky 9 that's <code>Rocky-9-GenericCloud.latest.x86_64.img</code>. Terraform uses a <code>data</code> source instead of <code>proxmox_virtual_environment_download_file</code>; nothing is fetched.
+          <strong className="block mt-1 text-[12px] text-amber-300">
+            ⚠ With this on, Bandolier does NOT verify the SHA256 of the file on Proxmox. You're responsible for confirming integrity (<code>sha256sum -c CHECKSUM</code>) before checking this box. The audit log records this choice per cluster init.
+          </strong>
+        </span>
       </div>
       <div className="field">
         <label className="field-label">Image source</label>

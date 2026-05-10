@@ -87,20 +87,22 @@ func (p *Profile) BuildTfvars(ctx context.Context, clusterID string, vr profiles
 	if snippetsStorage == "" {
 		snippetsStorage = "local"
 	}
+	imagePreUploaded, _ := prox["image_pre_uploaded"].(bool)
 
 	return map[string]any{
-		"proxmox_endpoint":         prox["endpoint"],
-		"proxmox_token_id":         prox["token_id"],
-		"proxmox_token_secret":     prox["token_secret"],
-		"proxmox_node":             prox["node"],
-		"proxmox_storage":          prox["storage"],
-		"proxmox_username":         prox["username"],
-		"proxmox_password":         prox["password"],
-		"proxmox_image_url":        imageURL,
-		"proxmox_image_sha256":     img.SHA256,
-		"proxmox_image_filename":   img.FileName,
-		"proxmox_image_storage":    imageStorage,
-		"proxmox_snippets_storage": snippetsStorage,
+		"proxmox_endpoint":           prox["endpoint"],
+		"proxmox_token_id":           prox["token_id"],
+		"proxmox_token_secret":       prox["token_secret"],
+		"proxmox_node":               prox["node"],
+		"proxmox_storage":            prox["storage"],
+		"proxmox_username":           prox["username"],
+		"proxmox_password":           prox["password"],
+		"proxmox_image_url":          imageURL,
+		"proxmox_image_sha256":       img.SHA256,
+		"proxmox_image_filename":     img.FileName,
+		"proxmox_image_storage":      imageStorage,
+		"proxmox_snippets_storage":   snippetsStorage,
+		"proxmox_image_pre_uploaded": imagePreUploaded,
 		"network_cidr":           net["cidr"],
 		"network_bridge_name":    net["bridge_name"],
 		"network_gateway":        net["gateway"],

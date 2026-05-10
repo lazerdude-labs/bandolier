@@ -44,6 +44,8 @@ If image, snippets, and VM disks all live on the same storage, that's one row in
 
 You only need to do this once per token — Bandolier reuses the same token for the lifetime of the cluster.
 
+> **Tip (v0.1.5+):** the wizard's **Test reachability** button will, on a missing-permission failure, surface the exact `pveum acl modify` command to run for the offending storage path. You don't have to look up which role to grant — the failure detail tells you. The pveum equivalent of the table above is, for each row: `pveum acl modify /storage/<name> --tokens '<user>@pam!<token>' --roles PVEDatastoreAdmin --propagate 1`.
+
 ---
 
 ## Snippets storage: enable the `snippets` content type
@@ -87,11 +89,13 @@ received an HTTP 403 response - Reason: Permission check failed
 
 Bandolier's catalog ships **three preference-ordered Rocky 9 mirrors**: `dl.rockylinux.org`, `download.rockylinux.org`, and `mirror.rackspace.com/rockylinux`. On deploy, the api HEAD-probes each in order and hands terraform the first 2xx URL. If your primary CDN is having a bad day, the deploy silently uses one of the alternates.
 
-If all three of your candidate mirrors HEAD-block (rare but possible during incidents), use the workaround below.
+If all three of your candidate mirrors HEAD-block (rare but possible during incidents — and at the time of writing, all three do for `dl.rockylinux.org`-routed traffic), use the supported pre-upload path below.
 
-### Workaround (manual pre-upload)
+### Fix (supported: pre-upload toggle, v0.1.5+)
 
-Download the image once to your laptop, upload it to the operator host, then `scp` it onto Proxmox's image storage:
+The wizard has an **"Image already uploaded to Proxmox (skip download)"** checkbox on the Proxmox step. When you tick it, terraform uses a `data "proxmox_virtual_environment_file"` source instead of `proxmox_virtual_environment_download_file`, so neither the bpg provider nor Proxmox ever issues a HEAD against the upstream CDN. Bandolier just references the file you've already placed on Proxmox.
+
+Pre-upload it once, then check the box:
 
 ```bash
 # On your machine
@@ -101,14 +105,20 @@ curl -fOL https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-Gene
 curl -fOL https://download.rockylinux.org/pub/rocky/9/images/x86_64/CHECKSUM
 sha256sum -c --ignore-missing CHECKSUM
 
-# Push to Proxmox; the filename pattern Bandolier expects is in
-# api/internal/profiles/homelab/distros.go (e.g. rocky9.img).
-scp Rocky-9-GenericCloud.latest.x86_64.qcow2 root@<proxmox-host>:/var/lib/vz/template/iso/rocky9.img
+# Push to Proxmox. The filename MUST match the catalog entry for your
+# selected distro — for Rocky 9 that's Rocky-9-GenericCloud.latest.x86_64.img
+# (Proxmox rejects the .qcow2 extension under content_type=iso). Definitive
+# source: api/internal/profiles/homelab/distros.go.
+scp Rocky-9-GenericCloud.latest.x86_64.qcow2 \
+    root@<proxmox-host>:/var/lib/vz/template/iso/Rocky-9-GenericCloud.latest.x86_64.img
 ```
 
-After that, redeploy. Terraform will see the file already exists at the expected `file_name` and skip the download.
+Then in the wizard's Proxmox step:
+1. Pick the same distro you just uploaded (or set a custom URL — the filename is what matters, not the URL).
+2. Tick **Image already uploaded to Proxmox (skip download)**.
+3. Save / Re-Initialize and deploy.
 
-> Future direction: a `proxmox_image_pre_uploaded: true` flag that switches Bandolier to a `data "proxmox_virtual_environment_file"` source instead of `proxmox_virtual_environment_download_file`. Tracked in the issue tracker.
+The api ignores the `proxmox_image_url` and SHA256 fields when this toggle is on — the file is whatever you placed, so verify the SHA256 yourself before uploading.
 
 ---
 

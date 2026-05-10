@@ -23,9 +23,10 @@ type initializeView struct {
 		Node            string `json:"node"`
 		Storage         string `json:"storage"`
 		Username        string `json:"username"`
-		ImageStorage    string `json:"image_storage"`
-		SnippetsStorage string `json:"snippets_storage"`
-		Distro          string `json:"distro"`
+		ImageStorage     string `json:"image_storage"`
+		SnippetsStorage  string `json:"snippets_storage"`
+		ImagePreUploaded bool   `json:"image_pre_uploaded"`
+		Distro           string `json:"distro"`
 		CustomURL       string `json:"custom_url"`
 		CustomSHA256    string `json:"custom_sha256"`
 		CABundle        string `json:"ca_bundle"`
@@ -113,6 +114,9 @@ func (i *Initializer) HandleGet(w http.ResponseWriter, r *http.Request) {
 	v.Proxmox.Username = stringFrom(prox, "username")
 	v.Proxmox.ImageStorage = stringFrom(prox, "image_storage")
 	v.Proxmox.SnippetsStorage = stringFrom(prox, "snippets_storage")
+	if b, ok := prox["image_pre_uploaded"].(bool); ok {
+		v.Proxmox.ImagePreUploaded = b
+	}
 	v.Proxmox.Distro = stringFrom(prox, "distro")
 	v.Proxmox.CustomURL = stringFrom(prox, "custom_url")
 	v.Proxmox.CustomSHA256 = stringFrom(prox, "custom_sha256")

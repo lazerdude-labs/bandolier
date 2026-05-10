@@ -21,12 +21,14 @@ locals {
     node         = var.proxmox_node
   }
 
-  # Resolved file_id of the cloud image downloaded by Proxmox itself
-  # (e.g. "local:iso/Rocky-9-GenericCloud.latest.x86_64.qcow2").
-  # Lives outside proxmox_config because that map feeds the provider block,
-  # and referencing a managed resource from a provider config creates a
-  # dependency cycle.
-  cloud_image_file_id = proxmox_virtual_environment_download_file.cloud_image.id
+  # Resolved file_id of the cloud image — either the resource (Proxmox
+  # downloaded it) or the data source (operator pre-uploaded it). Both
+  # produce the same id shape: "<storage>:iso/<filename>".
+  cloud_image_file_id = (
+    var.proxmox_image_pre_uploaded
+    ? data.proxmox_virtual_environment_file.cloud_image[0].id
+    : proxmox_virtual_environment_download_file.cloud_image[0].id
+  )
 
   # bpg/proxmox's initialization.ip_config.ipv4.address requires CIDR notation
   # (e.g. "192.0.2.21/24"). The form collects bare IPs + the network CIDR;

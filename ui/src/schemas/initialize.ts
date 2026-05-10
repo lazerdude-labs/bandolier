@@ -12,6 +12,7 @@ export const initializeSchema = z.object({
     ca_bundle: z.string().optional().default(''),
     image_storage: z.string().min(1).default('local'),
     snippets_storage: z.string().min(1).default('local'),
+    image_pre_uploaded: z.boolean().default(false),
     distro: z.string().optional().default(''),
     custom_url: z.string().optional().default(''),
     custom_sha256: z.string().optional().default(''),

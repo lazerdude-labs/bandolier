@@ -38,12 +38,13 @@ type initRequest struct {
 		Storage      string `json:"storage"`
 		Username     string `json:"username"`
 		Password     string `json:"password"`
-		ImageStorage    string `json:"image_storage"`
-		SnippetsStorage string `json:"snippets_storage"`
-		Distro          string `json:"distro"`
-		CustomURL    string `json:"custom_url"`
-		CustomSHA256 string `json:"custom_sha256"`
-		CABundle     string `json:"ca_bundle"`
+		ImageStorage     string `json:"image_storage"`
+		SnippetsStorage  string `json:"snippets_storage"`
+		ImagePreUploaded bool   `json:"image_pre_uploaded"`
+		Distro           string `json:"distro"`
+		CustomURL        string `json:"custom_url"`
+		CustomSHA256     string `json:"custom_sha256"`
+		CABundle         string `json:"ca_bundle"`
 	} `json:"proxmox"`
 	Network struct {
 		CIDR       string   `json:"cidr"`
@@ -253,9 +254,10 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 		"storage":       req.Proxmox.Storage,
 		"username":      req.Proxmox.Username,
 		"password":      req.Proxmox.Password,
-		"image_storage":    req.Proxmox.ImageStorage,
-		"snippets_storage": req.Proxmox.SnippetsStorage,
-		"distro":           req.Proxmox.Distro,
+		"image_storage":      req.Proxmox.ImageStorage,
+		"snippets_storage":   req.Proxmox.SnippetsStorage,
+		"image_pre_uploaded": req.Proxmox.ImagePreUploaded,
+		"distro":             req.Proxmox.Distro,
 		"custom_url":    req.Proxmox.CustomURL,
 		"custom_sha256": req.Proxmox.CustomSHA256,
 		"ca_bundle":     req.Proxmox.CABundle,
@@ -378,11 +380,22 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = i.store.UpdateClusterStatus(r.Context(), id, string(StatusInitialized))
+	// Audit details capture whether the operator opted into the pre-upload
+	// path. Pre-upload bypasses Proxmox's terraform-driven SHA256 verification
+	// (the data source has no checksum field — Proxmox just trusts the file
+	// already at <storage>:iso/<filename>); recording it in the audit log
+	// gives a clear forensic trail for the deploy that produced a given VM.
+	// Edit-mode ("re-init") gets logged as a separate boolean so the entry
+	// distinguishes a fresh init from a config change.
 	_, _ = audit.Write(r.Context(), i.store, audit.Entry{
 		ActorID: uid,
 		Action:  string(audit.ActionClusterInit),
 		Target:  id,
 		Outcome: audit.OutcomeSuccess,
+		Details: map[string]any{
+			"image_pre_uploaded": req.Proxmox.ImagePreUploaded,
+			"edit_mode":          isEdit,
+		},
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "initialized"})
 }
