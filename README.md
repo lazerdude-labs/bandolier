@@ -141,6 +141,20 @@ docker compose down       # keep volumes (resume later)
 docker compose down -v    # destroy volumes (fresh start)
 ```
 
+## Configuration
+
+The `api` container reads its filesystem and service locations from environment variables. Defaults match the layout in [`deploy/docker-compose.yml`](deploy/docker-compose.yml); override any of them when you mount volumes elsewhere or run the api outside Compose.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `BANDOLIER_DB_PATH` | `/var/lib/bandolier/app.db` | SQLite app DB |
+| `BANDOLIER_VAULT_ADDR` | `http://vault:8200` | Vault HTTP endpoint |
+| `BANDOLIER_VAULT_APPROLE_PATH` | `/vault-init-state/approle.json` | AppRole creds written by `vault-agent` |
+| `BANDOLIER_TF_STATE_ROOT` | `/var/lib/bandolier/tf-state` | Per-cluster terraform state directories |
+| `BANDOLIER_LOG_ROOT` | `/var/lib/bandolier/logs` | Deploy + apps install log files |
+| `BANDOLIER_TERRAFORM_DIR` | (unset; image default) | Terraform module source dir mounted into the container |
+| `BANDOLIER_ANSIBLE_DIR` | (unset; image default) | Ansible playbook + roles dir mounted into the container |
+
 ## Security model
 
 Bandolier is designed for a single trusted operator on a single host. The Vault unseal keys live in a docker volume on the host so that auto-recovery works after reboot — see [`deploy/vault-init/THREAT_MODEL.md`](deploy/vault-init/THREAT_MODEL.md) for the full trust boundary. If you need a stricter model, run Bandolier on a dedicated host gated by other means (separate VLAN, jump host, hardware-backed auto-unseal).
