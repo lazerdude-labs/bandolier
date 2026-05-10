@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-05-10
+
+Operator-config plumbing release: actually respect the wizard's storage fields, fix a silent fallback to `local-lvm` for the cloud-init drive, and add two ops-side docs covering the Proxmox setup and the failure modes real operators have hit. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.3` (or `:0.1` / `:latest`) to upgrade.
+
 ### Fixed
 
 - **VM disks now respect the operator's `proxmox.storage` form field.** Reported by an early user with a Ceph RBD-backed Proxmox setup. Through v0.1.2, `terraform/main.tf` hardcoded `datastore_id = "local-lvm"` (3×) inside the `vm_definitions` map regardless of what the operator put in the initialize wizard. The form input was silently dropped, and any host without `local-lvm` (RBD-backed setups, Ceph-only homelabs, etc.) couldn't deploy at all. The hardcoded values are now `var.proxmox_storage`, which is already wired through the Go-side `BuildTfvars`.
@@ -15,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`proxmox_snippets_storage` config field** for operators whose `local` storage doesn't have the `snippets` content type enabled. Threads through the wizard ("Snippets storage" field on the Proxmox step), `proxmox.snippets_storage` in the cluster's Vault config, the `proxmox_snippets_storage` tfvar, and `terraform/main.tf`'s `proxmox_virtual_environment_file` resource. Defaults to `"local"` so existing setups are unaffected. If you'd rather enable snippets on `local`, the Proxmox-side command is `pvesm set local --content backup,iso,vztmpl,snippets`.
-- **`TROUBLESHOOTING.md`** consolidating real operator-reported failures and verified fixes: required Proxmox token permissions (`PVEDatastoreAdmin` per storage), snippets-content-type setup, the Rocky CDN HEAD-block + manual pre-upload workaround, the host-source / container-mount / live-workspace path triad, and useful diagnostic commands. Linked from `CONTRIBUTING.md` and from the bug-report issue template.
+- **`TROUBLESHOOTING.md`** consolidating real operator-reported failures and verified fixes: required Proxmox token permissions (`PVEDatastoreAdmin` per storage), snippets-content-type setup, the Rocky CDN HEAD-block + manual pre-upload workaround, the host-source / container-mount / live-workspace path triad, and useful diagnostic commands.
 - **`docs/proxmox-setup.md`** — step-by-step Proxmox-side setup guide covering API token creation (UI + SSH), token permissions per storage, storage content types, VLAN-aware bridge configuration, the cloud-image catalog vs. pre-upload paths, and a verification checklist that maps directly onto the initialize wizard's fields. Linked from the README's Prerequisites section.
 
 ## [0.1.2] — 2026-05-10
