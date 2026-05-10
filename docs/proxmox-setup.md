@@ -88,10 +88,10 @@ SNIPPETS_STORAGE=local
 VM_DISK_STORAGE=local-lvm
 NODE=pve
 
-pveum acl modify "/storage/$IMAGE_STORAGE"    -token "$TOKEN" -role PVEDatastoreAdmin --propagate 1
-pveum acl modify "/storage/$SNIPPETS_STORAGE" -token "$TOKEN" -role PVEDatastoreAdmin --propagate 1
-pveum acl modify "/storage/$VM_DISK_STORAGE"  -token "$TOKEN" -role PVEDatastoreAdmin --propagate 1
-pveum acl modify "/nodes/$NODE"               -token "$TOKEN" -role PVEVMAdmin --propagate 1
+pveum acl modify "/storage/$IMAGE_STORAGE"    --tokens "$TOKEN" --roles PVEDatastoreAdmin --propagate 1
+pveum acl modify "/storage/$SNIPPETS_STORAGE" --tokens "$TOKEN" --roles PVEDatastoreAdmin --propagate 1
+pveum acl modify "/storage/$VM_DISK_STORAGE"  --tokens "$TOKEN" --roles PVEDatastoreAdmin --propagate 1
+pveum acl modify "/nodes/$NODE"               --tokens "$TOKEN" --roles PVEVMAdmin --propagate 1
 ```
 
 If a storage name is repeated (e.g. all three are `local`), running the command three times is fine — it's idempotent.
@@ -230,9 +230,11 @@ For the routine deploy flow you don't need this — it's purely a debugging conv
 Before clicking **Deploy** in the Bandolier UI, confirm each of these from your laptop or the Bandolier host:
 
 ```bash
-# 1. Token works
+# 1. Token works. Read the secret without echoing it to the terminal or
+#    leaving it in shell history; unset when done so it doesn't sit in
+#    the environment for the rest of the session.
 TOKEN_ID='root@pam!bandolier-api'
-TOKEN_SECRET='<paste-secret>'
+read -rs TOKEN_SECRET; export TOKEN_SECRET; echo
 curl -k -H "Authorization: PVEAPIToken=$TOKEN_ID=$TOKEN_SECRET" \
   https://<proxmox-host>:8006/api2/json/version
 # Expect: {"data":{"version":"8.x.y", ...}}
@@ -244,6 +246,9 @@ for s in <image-storage> <snippets-storage> <vm-disk-storage>; do
     "https://<proxmox-host>:8006/api2/json/nodes/<node>/storage/$s/content"
 done
 # Expect: each returns {"data":[...]}, never 403.
+
+# When done with the verification commands:
+unset TOKEN_SECRET
 
 # 3. Snippets content type is enabled on the snippets storage
 ssh root@<proxmox-host> "pvesm status -content snippets"
@@ -275,8 +280,8 @@ Map the values you've gathered to the wizard fields:
 | **Storage** | `<vm-disk-storage>` (e.g. `local-lvm`, `vm_data`) |
 | **API token id** | `root@pam!bandolier-api` |
 | **API token secret** | the secret from step 1 |
-| **SSH username** | `root` (used by the bpg provider's ssh block; Bandolier's api doesn't use it directly) |
-| **SSH password** | the root password (or whatever the SSH user authenticates with) |
+| **SSH username** | `root` (used by the bpg/proxmox provider's ssh block; Bandolier's api doesn't use it directly) |
+| **SSH password** | the SSH user's password — see note below on key-based auth |
 | **Image storage** | `<image-storage>` (default `local`) |
 | **Snippets storage** | `<snippets-storage>` (default `local`) |
 | **Image source** | Rocky 9, or **Custom URL** + SHA256 |
@@ -288,6 +293,8 @@ Use the values from the [Network section](#network-bridge-and-vlan).
 ### SSH step
 
 Optional. Leave both fields blank to have Bandolier auto-generate a keypair. Or paste a public + private key pair (both, or neither) if you want to bring your own.
+
+> **Note on Proxmox-side SSH:** the wizard's "SSH password" field on the **Proxmox** step is what the bpg/proxmox provider uses to authenticate to your Proxmox host (separate from the Vault-stored API token, separate from the cluster VMs' SSH keys above). For now Bandolier's wizard only accepts a password there; if you'd rather use SSH key auth to Proxmox, the workaround is to manually edit `terraform/modules/vm/main.tf` (or the live cluster workspace) and add an `ssh_private_key` attribute to the provider block. Tracked as a v0.2+ enhancement to surface this in the wizard.
 
 ---
 

@@ -121,6 +121,9 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 	if req.Proxmox.ImageStorage == "" {
 		req.Proxmox.ImageStorage = "local"
 	}
+	if req.Proxmox.SnippetsStorage == "" {
+		req.Proxmox.SnippetsStorage = "local"
+	}
 	if _, err := homelab.ResolveImage(req.Proxmox.Distro, req.Proxmox.CustomURL, req.Proxmox.CustomSHA256); err != nil {
 		_, _ = audit.Write(r.Context(), i.store, audit.Entry{
 			ActorID: uid,
