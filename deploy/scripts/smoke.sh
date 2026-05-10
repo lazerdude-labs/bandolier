@@ -25,7 +25,12 @@ cd "$HERE/.."
 check_deps() {
   local missing=()
   command -v docker >/dev/null 2>&1 || missing+=("docker")
-  docker compose version >/dev/null 2>&1 || missing+=("docker-compose-plugin (compose v2)")
+  # Only test the compose plugin when docker itself is present — otherwise we
+  # produce a misleading "install both" diagnostic in the case where the
+  # operator has the plugin but not docker.
+  if command -v docker >/dev/null 2>&1; then
+    docker compose version >/dev/null 2>&1 || missing+=("docker-compose-plugin (compose v2)")
+  fi
   command -v curl >/dev/null 2>&1 || missing+=("curl")
   command -v jq >/dev/null 2>&1 || missing+=("jq")
   if [ ${#missing[@]} -gt 0 ]; then
