@@ -16,11 +16,16 @@ func TestCatalogHasRocky9(t *testing.T) {
 	if d.Label == "" {
 		t.Error("Label is empty")
 	}
-	if !strings.HasPrefix(d.URL, "https://") {
-		t.Errorf("URL not https: %q", d.URL)
+	if len(d.URLs) == 0 {
+		t.Fatal("URLs is empty")
 	}
-	if !strings.HasSuffix(d.URL, ".qcow2") {
-		t.Errorf("URL not qcow2: %q", d.URL)
+	for i, u := range d.URLs {
+		if !strings.HasPrefix(u, "https://") {
+			t.Errorf("URLs[%d] not https: %q", i, u)
+		}
+		if !strings.HasSuffix(u, ".qcow2") {
+			t.Errorf("URLs[%d] not qcow2: %q", i, u)
+		}
 	}
 	if len(d.SHA256) != 64 {
 		t.Errorf("SHA256 length: got %d want 64", len(d.SHA256))
@@ -41,6 +46,9 @@ func TestResolveCatalogEntry(t *testing.T) {
 	if d.SHA256 == "" {
 		t.Error("SHA256 empty after resolve")
 	}
+	if len(d.URLs) == 0 {
+		t.Error("URLs empty after resolve")
+	}
 }
 
 func TestResolveCustomURL(t *testing.T) {
@@ -50,8 +58,8 @@ func TestResolveCustomURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveImage(custom): %v", err)
 	}
-	if d.URL != url {
-		t.Errorf("URL: got %q want %q", d.URL, url)
+	if len(d.URLs) != 1 || d.URLs[0] != url {
+		t.Errorf("URLs: got %v want [%q]", d.URLs, url)
 	}
 	if d.SHA256 != sha {
 		t.Errorf("SHA256: got %q want %q", d.SHA256, sha)
@@ -64,13 +72,13 @@ func TestResolveCustomURL(t *testing.T) {
 
 func TestProxmoxSafeFileNameRewritesDiskImageExtensions(t *testing.T) {
 	cases := map[string]string{
-		"foo.qcow2":         "foo.img",
-		"bar.qcow":          "bar.img",
-		"baz.raw":           "baz.img",
-		"already.img":       "already.img",
-		"unknown.iso":       "unknown.iso",
-		"no-extension":      "no-extension",
-		"deep.path.qcow2":   "deep.path.img",
+		"foo.qcow2":       "foo.img",
+		"bar.qcow":        "bar.img",
+		"baz.raw":         "baz.img",
+		"already.img":     "already.img",
+		"unknown.iso":     "unknown.iso",
+		"no-extension":    "no-extension",
+		"deep.path.qcow2": "deep.path.img",
 	}
 	for in, want := range cases {
 		if got := proxmoxSafeFileName(in); got != want {
