@@ -575,7 +575,7 @@ func installTraefik(ctx context.Context, factory apps.HelmFactory, v *vault.Clie
 	}
 	req := apps.InstallRequest{
 		Chart:            "traefik/traefik",
-		Version:          "34.2.1",
+		Version:          traefikChartVersion(),
 		ReleaseName:      "traefik",
 		Namespace:        "kube-system",
 		Atomic:           true,
