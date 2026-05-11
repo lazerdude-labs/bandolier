@@ -122,7 +122,20 @@ export const cancelDeployment = (deploymentID: string) =>
 export const deployCluster  = (clusterID: string) =>
   api<{ deployment_id: string }>('POST', `/api/clusters/${clusterID}/deploy`);
 export const destroyCluster  = (id: string) => api<{ deployment_id: string }>('POST', `/api/clusters/${id}/destroy`);
-export const deleteCluster   = (id: string) => api<void>('DELETE', `/api/clusters/${id}`);
+// deleteCluster forgets a cluster. Default mode (cascade=false) is a pure
+// local-state forget against non-live clusters; cascade=true tells the api
+// to destroy the running cluster first (returns 202 with a destroy
+// deployment_id; the executor completes the forget on destroy success).
+// Transient states (deploying/upgrading/destroying) still 409.
+export type DeleteClusterResponse =
+  | { deployment_id: string; phase: 'destroy'; message: string } // 202: cascade kicked off
+  | null;                                                          // 204: direct forget
+
+export const deleteCluster = (id: string, cascade = false) =>
+  api<DeleteClusterResponse>(
+    'DELETE',
+    cascade ? `/api/clusters/${id}?cascade=destroy` : `/api/clusters/${id}`,
+  );
 export const changePassword  = (current_password: string, new_password: string) =>
   api<void>('POST', '/api/auth/change-password', { current_password, new_password });
 

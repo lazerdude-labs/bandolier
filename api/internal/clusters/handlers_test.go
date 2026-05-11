@@ -2,6 +2,7 @@ package clusters_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -135,7 +136,7 @@ func TestDeleteRemovesRowWhenStatusDeletable(t *testing.T) {
 	reg := newTestRegistry()
 	h := clusters.NewHandler(s, reg, nil)
 
-	c := &store.Cluster{ID: "delcluster", Name: "del-foo", Profile: "homelab", Status: "destroyed"}
+	c := &store.Cluster{ID: "00000000000000000000000000000001", Name: "del-foo", Profile: "homelab", Status: "destroyed"}
 	if err := s.CreateCluster(context.Background(), c); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestDeleteRejectsLiveStatusWith409(t *testing.T) {
 	reg := newTestRegistry()
 	h := clusters.NewHandler(s, reg, nil)
 
-	c := &store.Cluster{ID: "live", Name: "live-foo", Profile: "homelab", Status: "ready"}
+	c := &store.Cluster{ID: "00000000000000000000000000000002", Name: "live-foo", Profile: "homelab", Status: "ready"}
 	if err := s.CreateCluster(context.Background(), c); err != nil {
 		t.Fatalf("CreateCluster: %v", err)
 	}
@@ -181,11 +182,119 @@ func TestDeleteMissingReturns404(t *testing.T) {
 	reg := newTestRegistry()
 	h := clusters.NewHandler(s, reg, nil)
 
-	req := httptest.NewRequest("DELETE", "/api/clusters/nope", nil)
-	req = withChiURLParam(req, "id", "nope")
+	missingID := "00000000000000000000000000000099"
+	req := httptest.NewRequest("DELETE", "/api/clusters/"+missingID, nil)
+	req = withChiURLParam(req, "id", missingID)
 	rr := httptest.NewRecorder()
 	h.Delete(rr, req)
 	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestDeleteCascadeOnLiveClusterKicksOffDestroyAndSetsLatch confirms the
+// happy path: DELETE ?cascade=destroy on a `ready` cluster (a) invokes the
+// destroy executor, (b) sets pending_forget=1 on the row, (c) returns 202
+// with the destroy deployment_id. The actual Forget happens in the
+// executor's runDestroy success path, which is tested separately in the
+// deployments package.
+func TestDeleteCascadeOnLiveClusterKicksOffDestroyAndSetsLatch(t *testing.T) {
+	s := newTestStore(t)
+	reg := newTestRegistry()
+
+	c := &store.Cluster{ID: "00000000000000000000000000000011", Name: "live-foo", Profile: "homelab", Status: "ready"}
+	if err := s.CreateCluster(context.Background(), c); err != nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+
+	called := false
+	exec := &fakeExecutor{destroyFn: func(_ context.Context, cid string) (string, error) {
+		called = true
+		if cid != c.ID {
+			t.Errorf("got cluster id %s want %s", cid, c.ID)
+		}
+		return "dep-cascade-1", nil
+	}}
+	h := clusters.NewHandler(s, reg, nil).WithDestroyExecutor(exec)
+
+	req := httptest.NewRequest("DELETE", "/api/clusters/"+c.ID+"?cascade=destroy", nil)
+	req = withChiURLParam(req, "id", c.ID)
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+	if !called {
+		t.Fatal("executor.Destroy not invoked on cascade path")
+	}
+	got, err := s.GetCluster(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("GetCluster: %v", err)
+	}
+	if !got.PendingForget {
+		t.Fatal("pending_forget should be true after cascade delete request")
+	}
+}
+
+// TestDeleteCascadeRollsBackLatchOnDestroyError confirms that if the
+// executor fails to kick off destroy (e.g. terraform unavailable, lock
+// contention), pending_forget is rolled back so a future operator-
+// initiated destroy doesn't silently auto-forget.
+func TestDeleteCascadeRollsBackLatchOnDestroyError(t *testing.T) {
+	s := newTestStore(t)
+	reg := newTestRegistry()
+
+	c := &store.Cluster{ID: "00000000000000000000000000000012", Name: "live-bar", Profile: "homelab", Status: "ready"}
+	if err := s.CreateCluster(context.Background(), c); err != nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+
+	exec := &fakeExecutor{destroyFn: func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("destroy executor blew up")
+	}}
+	h := clusters.NewHandler(s, reg, nil).WithDestroyExecutor(exec)
+
+	req := httptest.NewRequest("DELETE", "/api/clusters/"+c.ID+"?cascade=destroy", nil)
+	req = withChiURLParam(req, "id", c.ID)
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
+	}
+	got, err := s.GetCluster(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("GetCluster: %v", err)
+	}
+	if got.PendingForget {
+		t.Fatal("pending_forget must be rolled back when destroy kickoff fails")
+	}
+}
+
+// TestDeleteCascadeOnTransientStateStill409 confirms that ?cascade=destroy
+// against `deploying` / `upgrading` / `destroying` (clusters with a live
+// goroutine running against them) is rejected with 409. Cascade is for
+// live but quiescent states, not in-flight ones.
+func TestDeleteCascadeOnTransientStateStill409(t *testing.T) {
+	s := newTestStore(t)
+	reg := newTestRegistry()
+
+	c := &store.Cluster{ID: "00000000000000000000000000000013", Name: "in-flight", Profile: "homelab", Status: "deploying"}
+	if err := s.CreateCluster(context.Background(), c); err != nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+
+	exec := &fakeExecutor{destroyFn: func(context.Context, string) (string, error) {
+		t.Fatal("destroy should NOT be invoked against a transient state")
+		return "", nil
+	}}
+	h := clusters.NewHandler(s, reg, nil).WithDestroyExecutor(exec)
+
+	req := httptest.NewRequest("DELETE", "/api/clusters/"+c.ID+"?cascade=destroy", nil)
+	req = withChiURLParam(req, "id", c.ID)
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	if rr.Code != http.StatusConflict {
 		t.Fatalf("status = %d body = %s", rr.Code, rr.Body.String())
 	}
 }

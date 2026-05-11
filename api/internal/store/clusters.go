@@ -17,6 +17,13 @@ type Cluster struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// PendingForget is the cascade-delete latch. When true, the executor's
+	// runDestroy success path invokes the Forget orchestrator (Vault purge +
+	// DB row drop) after the cluster transitions to `destroyed`. Set by the
+	// DELETE /api/clusters/{id}?cascade=destroy handler against live
+	// clusters; cleared on destroy failure so the operator decides what to
+	// do with a partially-destroyed cluster.
+	PendingForget bool `json:"pending_forget"`
 }
 
 func (s *Store) CreateCluster(ctx context.Context, c *Cluster) error {
@@ -35,8 +42,8 @@ func (s *Store) CreateCluster(ctx context.Context, c *Cluster) error {
 func (s *Store) GetCluster(ctx context.Context, id string) (*Cluster, error) {
 	c := &Cluster{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, profile, status, created_at, updated_at FROM clusters WHERE id = ?`, id).
-		Scan(&c.ID, &c.Name, &c.Profile, &c.Status, &c.CreatedAt, &c.UpdatedAt)
+		`SELECT id, name, profile, status, created_at, updated_at, pending_forget FROM clusters WHERE id = ?`, id).
+		Scan(&c.ID, &c.Name, &c.Profile, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.PendingForget)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -45,7 +52,7 @@ func (s *Store) GetCluster(ctx context.Context, id string) (*Cluster, error) {
 
 func (s *Store) ListClusters(ctx context.Context) ([]Cluster, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, profile, status, created_at, updated_at FROM clusters ORDER BY created_at`)
+		`SELECT id, name, profile, status, created_at, updated_at, pending_forget FROM clusters ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -53,12 +60,34 @@ func (s *Store) ListClusters(ctx context.Context) ([]Cluster, error) {
 	var out []Cluster
 	for rows.Next() {
 		var c Cluster
-		if err := rows.Scan(&c.ID, &c.Name, &c.Profile, &c.Status, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Profile, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.PendingForget); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// SetPendingForget flips the cascade-delete latch on a cluster. Used by the
+// DELETE /api/clusters/{id}?cascade=destroy handler to mark a live cluster
+// for forget-after-destroy. Idempotent; setting to the current value is a
+// no-op.
+func (s *Store) SetPendingForget(ctx context.Context, id string, val bool) error {
+	v := 0
+	if val {
+		v = 1
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE clusters SET pending_forget = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		v, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateClusterStatus(ctx context.Context, id, status string) error {

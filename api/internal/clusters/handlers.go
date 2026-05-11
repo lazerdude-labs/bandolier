@@ -43,10 +43,24 @@ type Handler struct {
 	store    *store.Store
 	registry *profiles.Registry
 	vault    *vault.Client
+	// destroyExec is non-nil when the Delete handler's cascade=destroy path
+	// is wired up. nil in tests that don't exercise the cascade branch.
+	destroyExec DestroyExecutor
 }
 
 func NewHandler(s *store.Store, reg *profiles.Registry, v *vault.Client) *Handler {
 	return &Handler{store: s, registry: reg, vault: v}
+}
+
+// WithDestroyExecutor wires the destroy executor onto the Handler so the
+// DELETE /api/clusters/{id}?cascade=destroy branch can kick off a destroy
+// for live clusters. Returns the receiver for chaining at server-build
+// time. Kept as a setter rather than a constructor parameter to keep the
+// existing NewHandler signature stable for the many call sites that don't
+// touch cascade-delete.
+func (h *Handler) WithDestroyExecutor(e DestroyExecutor) *Handler {
+	h.destroyExec = e
+	return h
 }
 
 // DestroyExecutor is the minimal subset of *deployments.Executor the destroy handler depends on.
@@ -337,20 +351,53 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 // cluster. `destroying`/`upgrading`/`deploying`/`initializing` would orphan
 // in-flight infra; `ready`/`degraded` should be destroyed first so terraform
 // state stays consistent with reality.
-var deletableStatuses = map[string]struct{}{
+// directDeletableStatuses are the cluster states where Forget can drop the
+// row immediately. Live states (ready, degraded) need the cascade=destroy
+// flag and go through the executor; transient states (deploying, upgrading,
+// destroying) always 409 — the operator must wait or cancel first.
+var directDeletableStatuses = map[string]struct{}{
 	string(StatusPending):     {},
 	string(StatusInitialized): {},
 	string(StatusDestroyed):   {},
 	string(StatusError):       {},
 }
 
-// Delete removes a cluster's configuration row (and its CASCADE-linked
-// deployments / app rows / repo rows) plus best-effort cleanup of its Vault
-// secrets. Pure local-state operation — does not touch Proxmox or the VMs.
-// Caller must Destroy first if the cluster is ready/degraded.
+// cascadeDeletableStatuses are the live states Forget can handle when the
+// operator sets cascade=destroy. The DELETE handler kicks off Destroy and
+// sets pending_forget=1; the executor's runDestroy success path picks it up
+// and runs the orphaned Vault purge + row drop.
+var cascadeDeletableStatuses = map[string]struct{}{
+	string(StatusReady):    {},
+	string(StatusDegraded): {},
+}
+
+// Delete handles DELETE /api/clusters/{id}.
+//
+// Default (no `?cascade=destroy`): forgets the cluster's local config —
+// SQLite row + Vault paths — but does NOT touch Proxmox. Only accepted for
+// non-live states (pending, initialized, destroyed, error). Live clusters
+// return 409 with a hint to use cascade=destroy.
+//
+// With `?cascade=destroy`: a live cluster (ready / degraded) gets a Destroy
+// kicked off first, marked pending_forget=1; the executor's destroy-success
+// path completes the Forget after VMs are gone. Returns 202 + destroy
+// deployment_id. Transient states (deploying / upgrading / destroying)
+// still 409 — operator must wait or cancel.
+//
+// Existing audit log rows are intentionally left intact (target = cluster
+// id by string, post-delete forensic trail).
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	uid, _ := auth.UserIDFromContext(r.Context())
 	id := chi.URLParam(r, "id")
+	if !isValidClusterID(id) {
+		// Defense in depth — chi's default `{id}` pattern already rejects
+		// path separators, but ForgetCluster constructs Vault paths from
+		// this string, so reject anything that doesn't match the
+		// generator shape before we ever read from the DB or Vault.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		return
+	}
+	cascade := r.URL.Query().Get("cascade") == "destroy"
 
 	c, err := h.store.GetCluster(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
@@ -369,7 +416,67 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := deletableStatuses[c.Status]; !ok {
+	// Cascade path: destroy first, then auto-forget on success. Only valid
+	// for live clusters with cascade=destroy explicitly set; the executor
+	// reads pending_forget when terraform destroy finishes.
+	if cascade {
+		if _, ok := cascadeDeletableStatuses[c.Status]; ok {
+			if h.destroyExec == nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "destroy executor unavailable",
+				})
+				return
+			}
+			if err := h.store.SetPendingForget(r.Context(), id, true); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			depID, derr := h.destroyExec.Destroy(r.Context(), id)
+			if derr != nil {
+				// Roll back the latch — we never started destroy. Without
+				// this, a transient executor error would leave the cluster
+				// marked for forget while still ready/degraded, and the next
+				// successful destroy (operator-initiated, no cascade flag)
+				// would silently forget it.
+				_ = h.store.SetPendingForget(r.Context(), id, false)
+				_, _ = audit.Write(r.Context(), h.store, audit.Entry{
+					ActorID: uid,
+					Action:  string(audit.ActionClusterDelete),
+					Target:  id,
+					Outcome: audit.OutcomeFailure,
+					Details: map[string]any{"reason": "destroy_kickoff", "error": derr.Error()},
+				})
+				switch {
+				case errors.Is(derr, ErrInvalidTransition):
+					writeJSON(w, http.StatusConflict, map[string]string{"error": "cluster cannot be destroyed in current state"})
+				case errors.Is(derr, ErrLocked):
+					writeJSON(w, http.StatusConflict, map[string]string{"error": "deployment in progress"})
+				default:
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "destroy kickoff failed"})
+				}
+				return
+			}
+			_, _ = audit.Write(r.Context(), h.store, audit.Entry{
+				ActorID: uid,
+				Action:  string(audit.ActionClusterDelete),
+				Target:  id,
+				Outcome: audit.OutcomeStarted,
+				Details: map[string]any{"phase": "destroy", "deployment_id": depID, "cascade": "destroy"},
+			})
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"deployment_id": depID,
+				"phase":         "destroy",
+				"message":       "destroy in progress; cluster will be forgotten on success",
+			})
+			return
+		}
+		// Cascade requested but cluster isn't live → fall through to the
+		// direct-delete check below. A `destroyed` or `error` cluster with
+		// cascade=destroy is effectively a plain forget; no point bouncing
+		// the operator with a 409.
+	}
+
+	if _, ok := directDeletableStatuses[c.Status]; !ok {
 		_, _ = audit.Write(r.Context(), h.store, audit.Entry{
 			ActorID: uid,
 			Action:  string(audit.ActionClusterDelete),
@@ -377,68 +484,25 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 			Outcome: audit.OutcomeFailure,
 			Details: map[string]any{"reason": "invalid_status", "status": c.Status},
 		})
+		if _, isCascadable := cascadeDeletableStatuses[c.Status]; isCascadable {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "cluster is live; pass ?cascade=destroy to destroy and forget",
+			})
+			return
+		}
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "destroy the cluster before deleting its configuration",
+			"error": "cluster is in a transient state; wait for it to settle or cancel the running deployment",
 		})
 		return
 	}
 
-	// Best-effort Vault cleanup before the DB delete. If Vault is sealed or
-	// unreachable we still want the local row gone — operators can reconcile
-	// orphaned secrets later via vault CLI. Errors are recorded in audit
-	// details but don't block the delete.
-	vaultErrs := h.purgeVaultSecrets(r.Context(), id)
-
-	if err := h.store.DeleteCluster(r.Context(), id); err != nil {
-		_, _ = audit.Write(r.Context(), h.store, audit.Entry{
-			ActorID: uid,
-			Action:  string(audit.ActionClusterDelete),
-			Target:  id,
-			Outcome: audit.OutcomeFailure,
-			Details: map[string]any{"reason": "db_error", "error": err.Error()},
-		})
+	if err := ForgetCluster(r.Context(), h.store, h.vault, id, c.Name, c.Status, uid); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
-	details := map[string]any{"name": c.Name, "profile": c.Profile, "status_at_delete": c.Status}
-	if len(vaultErrs) > 0 {
-		details["vault_cleanup_errors"] = vaultErrs
-	}
-	_, _ = audit.Write(r.Context(), h.store, audit.Entry{
-		ActorID: uid,
-		Action:  string(audit.ActionClusterDelete),
-		Target:  id,
-		Outcome: audit.OutcomeSuccess,
-		Details: details,
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// purgeVaultSecrets removes the per-cluster KV paths the rest of the codebase
-// writes to (paths.go). Returns a list of human-readable error strings — one
-// per path that failed — so the caller can surface them in audit details.
-func (h *Handler) purgeVaultSecrets(ctx context.Context, clusterID string) []string {
-	if h.vault == nil {
-		return nil
-	}
-	p := vault.Paths{}
-	paths := []string{
-		p.Proxmox(clusterID),
-		p.Network(clusterID),
-		p.SSH(clusterID),
-		p.K3sJoin(clusterID),
-		p.Kubeconfig(clusterID),
-		p.JoinToken(clusterID),
-		// Phase 4 wildcard cert metadata. Kept inline (not on Paths) to match
-		// readNetwork's hand-built path above.
-		"clusters/" + clusterID + "/wildcard_cert",
-	}
-	var errs []string
-	for _, path := range paths {
-		if err := h.vault.Delete(ctx, path); err != nil {
-			errs = append(errs, path+": "+err.Error())
-		}
-	}
-	return errs
-}
+// purgeVaultSecrets / forget orchestration moved to forget.go so the
+// deployments executor's cascade path can reuse it without depending on
+// *Handler. See clusters/forget.go.

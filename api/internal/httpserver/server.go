@@ -88,7 +88,8 @@ func New(deps Deps) http.Handler {
 		pr.Get("/api/profiles", profiles.NewListHandler(deps.Registry).ServeHTTP)
 		pr.Get("/api/distros", homelab.NewDistrosHandler().ServeHTTP)
 
-		clusterH := clusters.NewHandler(deps.Store, deps.Registry, deps.Vault)
+		clusterH := clusters.NewHandler(deps.Store, deps.Registry, deps.Vault).
+			WithDestroyExecutor(deps.Executor)
 		pr.Post("/api/clusters", clusterH.Create)
 		pr.Get("/api/clusters", clusterH.List)
 		pr.Get("/api/clusters/{id}", clusterH.Get)
