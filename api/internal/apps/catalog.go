@@ -3,9 +3,13 @@ package apps
 import (
 	"context"
 	"io"
+	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // TraefikDefaultChartVersion is the single source of truth for the Traefik
@@ -131,15 +135,34 @@ func (c *catalogCache) invalidate(key string) {
 	delete(c.data, key)
 }
 
+// catalogRepoLister is the narrow contract Catalog needs from its backing
+// store. *Store satisfies this; tests substitute a fake without spinning
+// up an actual SQLite-backed store.Store.
+type catalogRepoLister interface {
+	ListRepos(ctx context.Context, clusterID string) ([]Repo, error)
+}
+
 // Catalog assembles curated entries with per-cluster repo-aggregated entries.
 // Construct one per process; cache state is internal.
 type Catalog struct {
-	store *Store
+	store catalogRepoLister
 	cache *catalogCache
 }
 
+// NewCatalog accepts the production *Store. Internal tests construct
+// *Catalog directly with a fake repoLister.
+//
+// Explicit nil-check: passing a typed nil *Store would otherwise produce
+// a non-nil interface value (Go's classic interface-nil gotcha), and the
+// `c.store != nil` guard inside Aggregate would silently malfunction.
+// Tests + main both pass either a real *Store or untyped nil, so keep the
+// invariant explicit at construction.
 func NewCatalog(s *Store) *Catalog {
-	return &Catalog{store: s, cache: newCatalogCache(catalogCacheTTL)}
+	var rs catalogRepoLister
+	if s != nil {
+		rs = s
+	}
+	return &Catalog{store: rs, cache: newCatalogCache(catalogCacheTTL)}
 }
 
 // Curated returns a defensive copy of the curated catalog slice.
@@ -163,10 +186,27 @@ func (c *Catalog) FindCurated(name string) (CatalogEntry, bool) {
 // Invalidate clears the cache slot for a cluster — call after repo add/remove.
 func (c *Catalog) Invalidate(clusterID string) { c.cache.invalidate(clusterID) }
 
+// aggregateParallelism caps the number of in-flight helm SearchRepo calls
+// during a single Aggregate(). 4 is enough to fan out the default seeded
+// repos (bitnami, grafana, prometheus-community, traefik) without spawning
+// an unbounded goroutine per repo when an operator adds many. Helm CLI
+// invocations are not particularly heavy on the api side (they read a
+// local index cache, not the remote registry), but each one shells out
+// and parses JSON, so bounding the concurrency keeps memory + CPU usage
+// predictable.
+const aggregateParallelism = 4
+
 // Aggregate returns the merged catalog for a cluster: curated entries plus
 // repo-sourced entries from each operator-registered repo. Cached per
 // catalogCacheTTL. Best-effort: a single repo failing search does not abort
 // the aggregation — those entries are dropped and the rest returned.
+//
+// Per-repo work runs concurrently behind an errgroup with a concurrency
+// cap of aggregateParallelism. RepoAdd + SearchRepo for one repo is one
+// task; tasks never return errgroup errors (we always return nil) because
+// best-effort semantics mean one bad repo shouldn't fail the whole call.
+// Errors from individual repos are logged via slog and the repo is just
+// skipped, matching the v0.1.0-v0.1.9 sequential behavior.
 func (c *Catalog) Aggregate(ctx context.Context, clusterID string, helm Helm) ([]CatalogEntry, error) {
 	if cached, ok := c.cache.get(clusterID); ok {
 		return cached, nil
@@ -178,21 +218,110 @@ func (c *Catalog) Aggregate(ctx context.Context, clusterID string, helm Helm) ([
 		if err != nil {
 			return nil, err
 		}
+
+		// One mutex protects appends to repoEntries from concurrent
+		// per-repo goroutines. Pre-sizing the slice based on len(repos)
+		// is impossible (we don't know how many charts each repo has),
+		// so append-under-lock is simplest. Lock contention is low —
+		// each goroutine spends almost all its time in helm CLI I/O
+		// and only locks briefly to append the parsed result.
+		var mu sync.Mutex
+		eg, egCtx := errgroup.WithContext(ctx)
+		eg.SetLimit(aggregateParallelism)
+
+		// Run RepoAdd serially BEFORE fanning SearchRepo out in parallel.
+		// helm CLI's `repo add` mutates a shared file (~/.config/helm/
+		// repositories.yaml). Two goroutines racing to write that file can
+		// corrupt it. At 4-goroutine concurrency the practical risk is low,
+		// but the 60s aggregate-cache window means the price of one
+		// corruption is up to a minute of failed catalog responses — not
+		// worth it. SearchRepo is read-only and parallelizes cleanly.
 		for _, r := range repos {
-			// Best-effort: ensure the repo is present in helm's local list.
-			// Errors are non-fatal — search will fail and we'll skip below.
-			_ = helm.RepoAdd(ctx, r.Name, r.URL)
-			entries, err := helm.SearchRepo(ctx, r.Name)
-			if err != nil {
-				continue
+			if err := helm.RepoAdd(ctx, r.Name, r.URL); err != nil {
+				// Don't log err.Error() verbatim: helm.RepoAdd's error
+				// can include the stderr stream from the helm CLI, which
+				// on auth failures contains the full repo URL — and a
+				// repo URL of the form https://user:password@host/ would
+				// leak credentials into structured logs. Log just the
+				// fact + repo name; the operator who added the repo
+				// can reproduce the failure manually.
+				slog.Warn("catalog aggregate: repo add failed (best-effort)",
+					"cluster", clusterID, "repo", r.Name)
 			}
-			repoEntries = append(repoEntries, entries...)
+		}
+
+		for _, r := range repos {
+			r := r // capture for goroutine
+			eg.Go(func() error {
+				entries, err := helm.SearchRepo(egCtx, r.Name)
+				if err != nil {
+					slog.Warn("catalog aggregate: repo search failed (best-effort, repo skipped)",
+						"cluster", clusterID, "repo", r.Name)
+					return nil
+				}
+				mu.Lock()
+				repoEntries = append(repoEntries, entries...)
+				mu.Unlock()
+				return nil
+			})
+		}
+		// errgroup.Wait returns the first non-nil error from any task; we
+		// always return nil from tasks so this is purely a fence-and-
+		// release on the goroutines. ctx-cancellation surfaces here too.
+		if err := eg.Wait(); err != nil {
+			return nil, err
 		}
 	}
 
 	merged := mergeCurated(repoEntries, curated)
 	c.cache.put(clusterID, merged)
 	return merged, nil
+}
+
+// FilterCatalog applies operator-supplied filter + pagination to an
+// already-aggregated catalog slice. Pure function (no IO) — runs against
+// the in-memory result of Aggregate, so the 60s aggregate cache absorbs
+// the helm CLI cost and per-request filter is fast.
+//
+// - search: case-insensitive substring match against Name and Description.
+//   Empty string means "no search filter".
+// - source: exact match against the Source field. Empty string or "all"
+//   means "no source filter" (curated AND all repo sources).
+// - limit, offset: standard pagination. limit <= 0 means "no pagination"
+//   (return everything matching the filters). offset < 0 is clamped to 0.
+//
+// Returns (entries, totalBeforePagination). Total is the matching count
+// before limit/offset are applied, so the UI can render "Showing N of M".
+func FilterCatalog(entries []CatalogEntry, search, source string, limit, offset int) ([]CatalogEntry, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	q := strings.ToLower(strings.TrimSpace(search))
+	matchSource := func(e CatalogEntry) bool {
+		return source == "" || source == "all" || e.Source == source
+	}
+	matchSearch := func(e CatalogEntry) bool {
+		if q == "" {
+			return true
+		}
+		return strings.Contains(strings.ToLower(e.Name), q) ||
+			strings.Contains(strings.ToLower(e.Description), q)
+	}
+	matched := make([]CatalogEntry, 0, len(entries))
+	for _, e := range entries {
+		if matchSource(e) && matchSearch(e) {
+			matched = append(matched, e)
+		}
+	}
+	total := len(matched)
+	if offset >= total {
+		return []CatalogEntry{}, total
+	}
+	matched = matched[offset:]
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, total
 }
 
 // mergeCurated combines repo-derived entries with curated entries. When a

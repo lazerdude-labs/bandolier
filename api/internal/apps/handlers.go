@@ -90,31 +90,83 @@ func NewHandler(s *Store, catalog *Catalog, hf HelmFactory) *Handler {
 // intentional — callers in this package only.
 func (h *Handler) ReleasesCache() *releaseCache { return h.releases }
 
-// Catalog returns the merged curated + repo-aggregated catalog for a cluster.
+// Catalog returns the merged curated + repo-aggregated catalog for a
+// cluster, optionally filtered + paginated server-side.
 //
 // GET /api/clusters/{id}/apps/catalog
+//
+// Query params (all optional):
+//
+//   - search:  case-insensitive substring match against name + description
+//   - source:  exact match against entry source ("curated" or repo name).
+//              Empty or "all" disables the filter.
+//   - limit:   max entries returned, 0-500. 0 / unset means no limit.
+//   - offset:  pagination offset, >= 0.
+//
+// Response: {"entries": [...], "total": N} where N is the count of all
+// matching entries before pagination. Lets the UI show "Showing X of N".
 func (h *Handler) Catalog(w http.ResponseWriter, r *http.Request) {
 	clusterID := chi.URLParam(r, "id")
 
+	q := r.URL.Query()
+	search := q.Get("search")
+	source := q.Get("source")
+	limit, ok := parseBoundedInt(q.Get("limit"), 0, 500)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be 0-500"})
+		return
+	}
+	offset, ok := parseBoundedInt(q.Get("offset"), 0, 1<<20)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "offset must be 0 or positive"})
+		return
+	}
+
 	helm, cleanup, err := h.hf.For(r.Context(), clusterID)
 	if err != nil {
-		// No kubeconfig (cluster not ready) — return curated only so the UI
-		// has something to render rather than a 500. Repos require a working
-		// cluster anyway.
-		writeJSON(w, http.StatusOK, h.catalog.Curated())
+		// No kubeconfig (cluster not ready) — return curated only so the
+		// UI has something to render rather than a 500. Repos require a
+		// working cluster anyway. Apply the same filter+paginate path so
+		// the UI's "Showing N of M" stays correct against the curated
+		// subset.
+		curated := h.catalog.Curated()
+		entries, total := FilterCatalog(curated, search, source, limit, offset)
+		writeJSON(w, http.StatusOK, CatalogResponse{Entries: entries, Total: total})
 		return
 	}
 	defer cleanup()
 
-	entries, err := h.catalog.Aggregate(r.Context(), clusterID, helm)
+	all, err := h.catalog.Aggregate(r.Context(), clusterID, helm)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errMap(err))
 		return
 	}
+	if all == nil {
+		all = []CatalogEntry{}
+	}
+	entries, total := FilterCatalog(all, search, source, limit, offset)
 	if entries == nil {
 		entries = []CatalogEntry{}
 	}
-	writeJSON(w, http.StatusOK, entries)
+	writeJSON(w, http.StatusOK, CatalogResponse{Entries: entries, Total: total})
+}
+
+// parseBoundedInt parses a string into an int and validates it falls
+// within [min, max] inclusive. Empty string is treated as 0 (the
+// "unset" sentinel for limit/offset). Returns (value, ok); ok=false
+// means the caller should 400.
+func parseBoundedInt(s string, min, max int) (int, bool) {
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	if n < min || n > max {
+		return 0, false
+	}
+	return n, true
 }
 
 // Releases returns the live Helm release list for a cluster, cached 30s.
@@ -148,16 +200,21 @@ func (h *Handler) Releases(w http.ResponseWriter, r *http.Request) {
 }
 
 // Installs returns the install history rows for a cluster (most recent first).
-// Optional ?limit query (default 50, max 200, enforced inside the store).
+// Optional ?limit query (default 50, range 1-200). Validated at the HTTP
+// boundary so a malicious or buggy caller can't force a large DB scan via
+// `?limit=99999999` — pattern matches Catalog's parseBoundedInt gate.
 //
 // GET /api/clusters/{id}/apps/installs
 func (h *Handler) Installs(w http.ResponseWriter, r *http.Request) {
 	clusterID := chi.URLParam(r, "id")
 	limit := 50
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			limit = n
+		n, ok := parseBoundedInt(v, 1, 200)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be 1-200"})
+			return
 		}
+		limit = n
 	}
 	rows, err := h.store.ListInstallsForCluster(r.Context(), clusterID, limit)
 	if err != nil {
