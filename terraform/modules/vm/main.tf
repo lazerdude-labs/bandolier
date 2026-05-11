@@ -31,8 +31,13 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   network_device {
-    bridge  = var.bridge
-    vlan_id = var.vlan_id
+    bridge = var.bridge
+    # vlan_id == 0 is the sentinel for "untagged / flat network". Passing
+    # null tells the bpg/proxmox provider to omit the tag entirely, which
+    # is what Proxmox itself wants for a bridge that's not VLAN-aware (or
+    # for the default untagged VLAN on a VLAN-aware bridge). 1-4094 is a
+    # standard 802.1Q tag.
+    vlan_id = var.vlan_id == 0 ? null : var.vlan_id
     model   = var.model
   }
 

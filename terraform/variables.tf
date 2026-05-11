@@ -103,8 +103,12 @@ variable "network_bridge_name" {
 }
 
 variable "network_vlan" {
-  description = "VLAN tag for VM network interfaces."
+  description = "802.1Q VLAN tag for VM network interfaces. 1-4094 for a tagged VLAN; 0 to leave the network_device untagged (flat-network setups, or the default untagged VLAN on a VLAN-aware bridge)."
   type        = number
+  validation {
+    condition     = var.network_vlan >= 0 && var.network_vlan <= 4094
+    error_message = "network_vlan must be 0 (untagged) or 1-4094 (tagged)."
+  }
 }
 
 variable "network_master_ip" {
