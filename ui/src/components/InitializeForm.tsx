@@ -113,7 +113,48 @@ export function InitializeForm({
 
   const goBack = () => { if (currentStep > 0) setCurrentStep(currentStep - 1); };
 
-  const handleSubmit = methods.handleSubmit(async (v) => { await onSubmit(v); });
+  // Multi-step form's submit-gate.
+  //
+  // The form has a single <form onSubmit={...}> wrapping all three steps.
+  // Browsers default-submit a form when Enter is pressed inside a single-
+  // line text input — regardless of whether a submit button is visible —
+  // and React Hook Form's handleSubmit happily runs the FULL schema
+  // validation. With sensible defaults across all three steps (which the
+  // homelab profile provides), the validation passes on early steps too
+  // and the form quietly submits, skipping steps 2+3 entirely. Operators
+  // then never see the SSH step and end up with auto-generated SSH keys
+  // they never configured.
+  //
+  // Gate at the DOM level: preventDefault unconditionally, then route
+  // through goNext on non-final steps. Only step 2 (SSH) actually
+  // submits. As belt-and-suspenders, the form root also intercepts
+  // Enter on non-textarea inputs and routes it through goNext.
+  const realSubmit = methods.handleSubmit(async (v) => { await onSubmit(v); });
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    if (currentStep < 2) {
+      e.preventDefault();
+      await goNext();
+      return;
+    }
+    await realSubmit(e);
+  };
+  // Enter pressed inside a single-line input would, by default, submit
+  // the form — handleSubmit above would catch that and route to goNext,
+  // but only AFTER React Hook Form has noisily run the full schema
+  // validation. Intercepting at keyDown skips that round-trip and feels
+  // snappier. Textareas (SSH key fields) keep Enter for newline insert.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== 'Enter') return;
+    if (currentStep === 2) return; // final step — Enter == submit, by design
+    const tag = (e.target as HTMLElement).tagName;
+    // Exempt elements where Enter has its own native meaning: textareas
+    // insert newlines, selects confirm the dropdown selection. Intercepting
+    // either would steal a keystroke the operator expects to do something
+    // local to the control, not navigate the wizard.
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return;
+    e.preventDefault();
+    void goNext();
+  };
 
   // Build live summary from current form values.
   const watched = methods.watch();
@@ -122,7 +163,7 @@ export function InitializeForm({
   return (
     <EditModeContext.Provider value={editCtx}>
     <FormProvider {...methods}>
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} onKeyDown={handleKeyDown}>
         <div className="grid gap-6" style={{ gridTemplateColumns: '240px 1fr 320px', alignItems: 'start' }}>
           {/* Left rail: stepper */}
           <div className="card card-pad" style={{ position: 'sticky', top: 80 }}>
@@ -201,7 +242,10 @@ function buildSummary(v: Partial<InitializeInput>): SummarySection[] {
     { label: 'Master',  value: v.network?.master_ip || '' },
     { label: 'Agent 1', value: v.network?.agent1_ip || '' },
     { label: 'Agent 2', value: v.network?.agent2_ip || '' },
-    { label: 'VLAN',    value: v.network?.vlan ? String(v.network.vlan) : '' },
+    // Explicit === 0 check so the summary shows "untagged" only when the
+    // operator deliberately picked 0, not when the network defaults haven't
+    // populated yet (undefined → '' so the row is visibly blank).
+    { label: 'VLAN',    value: v.network?.vlan === 0 ? 'untagged' : v.network?.vlan ? String(v.network.vlan) : '' },
     { label: 'Bridge',  value: v.network?.bridge_name || '' },
     { label: 'DNS',     value: manageDns ? 'managed by Bandolier' : 'operator-managed', mono: false },
   ];
@@ -557,8 +601,14 @@ function NetworkStep() {
           {err?.agent2_ip ? <span className="field-error">{String(err.agent2_ip.message)}</span> : null}
         </div>
         <div className="field">
-          <label className="field-label">VLAN</label>
-          <input type="number" className="input mono" {...register('network.vlan', { valueAsNumber: true })} />
+          <label className="field-label">VLAN <span className="text-muted-foreground">(optional)</span></label>
+          <input type="number" min={0} max={4094} className="input mono" {...register('network.vlan', { valueAsNumber: true })} />
+          <span className="field-hint">802.1Q tag for the network_device, 1–4094. Leave at <code>0</code> for an untagged / flat-network setup.</span>
+          {watch('network.vlan') === 0 ? (
+            <span className="field-hint text-amber-300">
+              ⚠ With VLAN 0, the VM joins the bridge's <strong>native (untagged) VLAN</strong>. On a VLAN-aware bridge this could be your management network or any other VLAN configured as native — verify <code>{watch('network.bridge_name') || 'vmbr1'}</code>'s native VLAN before deploying.
+            </span>
+          ) : null}
           {err?.vlan ? <span className="field-error">{String(err.vlan.message)}</span> : null}
         </div>
       </div>

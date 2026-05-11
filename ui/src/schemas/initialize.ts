@@ -35,7 +35,11 @@ export const initializeSchema = z.object({
     master_ip: z.string().min(1),
     agent1_ip: z.string().min(1),
     agent2_ip: z.string().min(1),
-    vlan: z.number().int().min(1).max(4094),
+    // 0 is the sentinel for "untagged" — operators on a flat (non-VLAN)
+    // network leave this at 0 and the terraform module skips setting
+    // vlan_id on the network_device. Documented in docs/proxmox-setup.md.
+    // 1-4094 is the valid 802.1Q tag range.
+    vlan: z.number().int().min(0).max(4094),
     bridge_name: z.string().min(1),
     traefik_dashboard: z.boolean().default(true),
     manage_dns: z.boolean().default(true),

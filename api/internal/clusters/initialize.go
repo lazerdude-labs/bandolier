@@ -192,6 +192,24 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing required fields"})
 		return
 	}
+	// VLAN bounds check. The Zod schema on the wizard enforces 0-4094, but
+	// the api endpoint is reachable directly (authenticated user, no UI
+	// required) — without a server-side check, an out-of-bounds value
+	// would silently land in Vault before terraform's plan-time validation
+	// catches it, leaving a poisoned config behind. 0 = untagged (sentinel
+	// the terraform vm module translates to `vlan_id = null`); 1-4094 =
+	// standard 802.1Q tag.
+	if req.Network.VLAN < 0 || req.Network.VLAN > 4094 {
+		_, _ = audit.Write(r.Context(), i.store, audit.Entry{
+			ActorID: uid,
+			Action:  string(audit.ActionClusterInit),
+			Target:  id,
+			Outcome: audit.OutcomeFailure,
+			Details: map[string]any{"reason": "vlan_out_of_range", "vlan": req.Network.VLAN},
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "network.vlan must be 0 (untagged) or 1-4094"})
+		return
+	}
 	if req.Proxmox.ImageStorage == "" {
 		req.Proxmox.ImageStorage = "local"
 	}

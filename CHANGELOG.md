@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-05-11
+
+Two operator-experience fixes uncovered by a real v0.1.7 deploy: the wizard could silently skip its SSH step when the operator pressed Enter inside a network input, and the VLAN field rejected the documented "0 for untagged" value. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.8` (or `:0.1` / `:latest`) to upgrade.
+
+### Fixed
+
+- **Initialize wizard no longer submits prematurely on Enter.** The wizard wraps all three steps in a single `<form>` and React Hook Form's `handleSubmit` happily validates the full schema on any submit event — including the implicit browser submit when Enter is pressed inside a single-line input. With sensible homelab defaults across every step (and SSH optional/blank), the form passed validation and submitted from step 1 (Network), skipping step 2 (SSH) entirely. Operators ended up at the cluster page without ever seeing the SSH configuration and got auto-generated keys they never knew were created. Fix gates submit at the DOM level: `preventDefault` unconditionally, route through the step-advance helper on steps 1–2, only actually submit on step 3 (SSH). Belt-and-suspenders `onKeyDown` interceptor intercepts Enter on non-textarea inputs and calls the step-advance helper directly so the user gets snappy advance behavior without the round-trip through React Hook Form's full-schema validator.
+- **VLAN field is now optional.** Through v0.1.7 the wizard's Zod schema required `vlan: 1-4094`, even though `docs/proxmox-setup.md` documented "set to 0 for untagged" as the correct path for flat-network setups. The mismatch silently rejected the documented setup. Schema now accepts `0–4094`, the form labels the field "VLAN (optional)" with an inline hint, and the live summary shows "untagged" only when the operator deliberately picks 0 (an explicit `=== 0` check, so an undefined value during edit-mode load doesn't briefly render as "untagged"). The terraform vm module's `network_device.vlan_id` becomes `null` when the var is 0 — the bpg/proxmox provider omits the tag entirely, which is what Proxmox itself wants for a non-VLAN-aware bridge (or the default untagged VLAN on a VLAN-aware bridge). Root `network_vlan` variable gains a `validation` block asserting the `0–4094` range. The wizard surfaces an amber warning when VLAN 0 is selected, noting that the VM will join the bridge's native VLAN — operators should verify they know what that is on a VLAN-aware bridge before proceeding.
+
+### Security
+
+- **`POST /api/clusters/{id}/initialize` now bounds-checks `network.vlan` server-side (0–4094).** Caught in security review. The wizard's Zod schema enforces the range, but the api endpoint is reachable directly (authenticated user, no UI required) — without a server-side check, an out-of-bounds value would silently land in Vault before terraform's plan-time validation caught it, leaving a poisoned config behind. Returns 400 with a clear message when the value is out of range.
+- **Wizard `onKeyDown` Enter-intercept now also exempts `<select>` elements.** Caught in code review. Without the exemption, pressing Enter on a focused dropdown (e.g. the distro selector) was intercepted and routed to step-advance, stealing the keystroke from its native "confirm selection" meaning.
+
 ## [0.1.7] — 2026-05-11
 
 The Forget button is now safe to use against live clusters: it cascades through Destroy automatically, so the operator no longer has to remember the two-step Destroy-then-Forget dance. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.7` (or `:0.1` / `:latest`) to upgrade.
