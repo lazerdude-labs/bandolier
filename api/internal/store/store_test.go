@@ -22,7 +22,7 @@ func TestOpenAndMigrate(t *testing.T) {
 		`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 6 {
-		t.Fatalf("expected schema_version=6, got %d", version)
+	if version != 7 {
+		t.Fatalf("expected schema_version=7, got %d", version)
 	}
 }

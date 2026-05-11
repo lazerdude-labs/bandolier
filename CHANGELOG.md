@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-05-11
+
+The Forget button is now safe to use against live clusters: it cascades through Destroy automatically, so the operator no longer has to remember the two-step Destroy-then-Forget dance. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.7` (or `:0.1` / `:latest`) to upgrade.
+
+### Added
+
+- **`DELETE /api/clusters/{id}?cascade=destroy` extends Forget to live clusters.** Through v0.1.6, Forget worked only on `pending | initialized | destroyed | error` clusters; clicking it on a `ready` or `degraded` cluster returned 409 with "destroy the cluster before deleting its configuration". Operators frequently skipped the Destroy step and were left with orphaned VMs in Proxmox. The new cascade mode (a) sets a `pending_forget` latch on the cluster row, (b) kicks off `terraform destroy` via the existing executor, (c) returns 202 with the destroy `deployment_id`. The executor's `runDestroy` success path reads the latch and completes the Forget — Vault paths purged, SQLite row dropped — after terraform finishes. On destroy failure (terraform exit non-zero, vault unreachable, etc.), the latch is cleared and the cluster stays in `error` so the operator can investigate before throwing away config. Transient states (`deploying | upgrading | destroying`) still 409 — operator must wait or cancel the in-flight deployment first. Schema migration 007 adds `clusters.pending_forget INTEGER NOT NULL DEFAULT 0`.
+- **UI Forget button extends to `ready | degraded` clusters with state-aware modal copy.** When clicked on a live cluster, the modal title changes to "Destroy and forget cluster?" and the body spells out the two-step plan (terraform destroy → row drop) with an amber warning that VMs will be torn down. On confirm, the UI POSTs the cascade-flagged DELETE and navigates to the destroy deploy log page so the operator sees terraform output streaming live. The non-cascade path is unchanged. Distinct modal copy by design so an operator can't accidentally tear down VMs thinking they're just clearing a stale row.
+- **Audit log gains `cluster_delete` started-phase entries** when cascade is used (action=`cluster_delete`, outcome=`started`, details include `phase: "destroy"`, `deployment_id`, `cascade: "destroy"`). The terminal `success` / `failure` row is still written by the executor after destroy completes (or the operator-initiated direct-forget path, unchanged).
+
+### Changed
+
+- **Forget-orchestration code lifted out of `*Handler` into a package fn.** `clusters.PurgeVaultSecrets(ctx, vault, id)` and `clusters.ForgetCluster(ctx, store, vault, id, name, status, actorID)` are now package-level, so both the operator-initiated DELETE path and the executor's cascade hook can invoke them without the handler dependency. Pure refactor — no behavior change in the non-cascade path.
+- **`DELETE /api/clusters/{id}` now validates the cluster id against the generator shape (32 lowercase hex chars).** Defense in depth: `ForgetCluster` constructs Vault paths from this string, so a path-traversal-style id (`../auth/master`) hitting Vault would be catastrophic. chi's default `{id}` matching already rejects `/`, but the `isValidClusterID` guard makes the invariant explicit and survives any future routing refactor.
+
+### Security
+
+- **`pending_forget` latch is now cleared during `RecoverOrphanedDeployments`.** Caught in security review. Without this, an api restart mid-cascade-destroy left the latch set on the cluster row (which had transitioned to `error` via orphan recovery); the next operator-initiated destroy on that errored cluster would silently auto-forget on success — surprising the operator who just wanted to retry. Recovery now clears the latch alongside the deployment-failed + cluster-error transitions.
+- **Cascade-destroy failure now emits a `cluster_delete:failure` audit row.** Previously a started `cluster_delete` row from the DELETE handler had no terminal counterpart in the audit log when the cascaded destroy itself failed (the terminal row went under `cluster_destroy`). Closes a forensic gap for operators filtering audit by action.
+
 ## [0.1.6] — 2026-05-10
 
 Two latent bugs uncovered by the first end-to-end deploy on a clean Vault, post-v0.1.5: every cluster init died at the TLS-wildcard step because Vault PKI was never bootstrapped, and the deploy log stream returned 403 for any operator hitting the UI from a non-loopback host. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.6` (or `:0.1` / `:latest`) to upgrade.

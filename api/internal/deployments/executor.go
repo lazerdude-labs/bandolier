@@ -63,6 +63,19 @@ func (e *Executor) RecoverOrphanedDeployments(ctx context.Context) error {
 	for _, d := range orphans {
 		_ = e.Store.FinishDeployment(ctx, d.ID, "failed", "api restart orphaned deployment")
 		_ = e.Store.UpdateClusterStatus(ctx, d.ClusterID, string(clusters.StatusError))
+		// Clear pending_forget on orphaned destroys. The cascade latch was
+		// set by the DELETE ?cascade=destroy handler before kicking off
+		// terraform destroy; if the api restarts mid-destroy, the latch
+		// would otherwise survive into the next operator-initiated destroy
+		// attempt and silently auto-forget a cluster the operator only
+		// meant to retry. Clearing here means the operator's next destroy
+		// behaves like a plain destroy (cluster goes to `destroyed`, no
+		// forget) and they can explicitly click Forget if that's what
+		// they wanted. Apply unconditionally rather than gating on
+		// operation==destroy: a stale latch on any orphaned deployment
+		// type is wrong, and SetPendingForget(false) is a no-op when the
+		// flag was already 0.
+		_ = e.Store.SetPendingForget(ctx, d.ClusterID, false)
 	}
 	return nil
 }
@@ -386,6 +399,21 @@ func (e *Executor) runDestroy(ctx context.Context, depID, clusterID string, prof
 		status, outcome := finishStatus(ctx.Err(), true)
 		_ = e.Store.FinishDeployment(bg, depID, status, msg)
 		_ = e.Store.UpdateClusterStatus(bg, clusterID, string(clusters.StatusError))
+		// Read pending_forget before clearing it so we can emit the
+		// cluster_delete failure audit row when the cascade was in
+		// flight. Operators filtering audit on `cluster_delete` need to
+		// see a terminal row for every started row — otherwise the
+		// forensic trail leaves "started but never completed" entries
+		// behind on every failed cascade-destroy.
+		hadLatch := false
+		if c, gerr := e.Store.GetCluster(bg, clusterID); gerr == nil {
+			hadLatch = c.PendingForget
+		}
+		// Clear the cascade-forget latch on destroy failure: leaving it
+		// set would auto-forget on the next operator-initiated destroy,
+		// which is the wrong default — a failed destroy means the
+		// operator should look at why before throwing away config.
+		_ = e.Store.SetPendingForget(bg, clusterID, false)
 		_, _ = audit.Write(bg, e.Store, audit.Entry{
 			ActorID: actorID,
 			Action:  string(audit.ActionClusterDestroy),
@@ -393,6 +421,19 @@ func (e *Executor) runDestroy(ctx context.Context, depID, clusterID string, prof
 			Outcome: outcome,
 			Details: map[string]any{"error": msg},
 		})
+		if hadLatch {
+			_, _ = audit.Write(bg, e.Store, audit.Entry{
+				ActorID: actorID,
+				Action:  string(audit.ActionClusterDelete),
+				Target:  clusterID,
+				Outcome: audit.OutcomeFailure,
+				Details: map[string]any{
+					"reason":        "destroy_failed",
+					"deployment_id": depID,
+					"cascade":       "destroy",
+				},
+			})
+		}
 		publish(Event{Type: EventDeploymentComplete, Status: status, Text: msg})
 	}
 
@@ -452,6 +493,28 @@ func (e *Executor) runDestroy(ctx context.Context, depID, clusterID string, prof
 		Target:  clusterID,
 		Outcome: audit.OutcomeSucceeded,
 	})
+
+	// 5. Cascade-forget hook. If the operator triggered destroy via
+	// DELETE /api/clusters/{id}?cascade=destroy, pending_forget=1 was set
+	// on the row before the destroy started. Read it back (the column is
+	// authoritative — the DB-state survives an api restart mid-destroy)
+	// and, on a clean destroy, complete the Forget: Vault purge + row
+	// drop. Failures on this path are reported via audit only — the
+	// destroy itself succeeded and the publish below tells the UI so. The
+	// operator can still click Forget on the now-destroyed cluster if the
+	// cascade portion failed.
+	//
+	// Note: we deliberately re-read the cluster row here rather than
+	// caching pending_forget at Destroy() time. If the api restarts mid-
+	// destroy, the executor goroutine that recovers (via deployments-
+	// resume on boot) will still see the latch.
+	if c, err := e.Store.GetCluster(ctx, clusterID); err == nil && c.PendingForget {
+		_, _ = fmt.Fprintln(&logWriter, "cascade-forget: destroying complete, removing local cluster row + vault paths")
+		if ferr := clusters.ForgetCluster(ctx, e.Store, e.Vault, clusterID, c.Name, string(clusters.StatusDestroyed), actorID); ferr != nil {
+			_, _ = fmt.Fprintf(&logWriter, "cascade-forget warning: %s (cluster left in destroyed state; click Forget to retry)\n", ferr.Error())
+		}
+	}
+
 	publish(Event{Type: EventDeploymentComplete, Status: "succeeded"})
 }
 

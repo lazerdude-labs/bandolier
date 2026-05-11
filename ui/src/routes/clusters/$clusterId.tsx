@@ -35,6 +35,15 @@ function relTime(iso: string | null | undefined): string {
 
 function shortId(id: string): string { return `c-${id.slice(0, 8)}`; }
 
+// isLiveStatus is the UI's mirror of the backend's cascadeDeletableStatuses
+// (api/internal/clusters/handlers.go). Forget against these statuses uses
+// the destroy-and-forget cascade path; everything else is a direct local-
+// state forget. Transient states (deploying/upgrading/destroying) aren't
+// covered here — the Forget button is hidden for those.
+function isLiveStatus(status: string | undefined): boolean {
+  return status === 'ready' || status === 'degraded';
+}
+
 export function ClusterOverview() {
   const { clusterId } = useParams({ from: '/clusters/$clusterId' });
   const nav = useNavigate();
@@ -81,13 +90,34 @@ export function ClusterOverview() {
     onError: (err: unknown) =>
       push({ kind: 'error', title: 'Destroy failed to start', body: errMessage(err, 'unknown') }),
   });
+  // Forget has two response shapes: direct (204, no body) for non-live
+  // clusters, and async (202 with deployment_id) when cascade=destroy is
+  // sent against a live cluster. The mutation handles both — on a 202 we
+  // navigate to the deploy log so the operator sees terraform destroy
+  // running; the executor completes the Forget on destroy success.
+  //
+  // We read `cluster.data?.status` at mutation-call time rather than
+  // closing over the rendered `status` const: between the last poll and
+  // the modal confirm click, the cluster could have transitioned (e.g.
+  // ready → degraded → destroying via another operator). Passing the
+  // wrong cascade flag is recoverable (backend 409s either way and the
+  // toast surfaces) but the fresh read avoids the avoidable race.
   const forget = useMutation({
-    mutationFn: () => deleteCluster(clusterId),
-    onSuccess: () => {
+    mutationFn: () => deleteCluster(clusterId, isLiveStatus(cluster.data?.status)),
+    onSuccess: (resp) => {
       setShowForget(false);
       qc.invalidateQueries({ queryKey: ['clusters'] });
-      push({ kind: 'success', title: 'Cluster forgotten', body: 'Configuration and Vault secrets removed.' });
-      nav({ to: '/clusters', replace: true });
+      if (resp && typeof resp === 'object' && 'deployment_id' in resp) {
+        push({
+          kind: 'success',
+          title: 'Destroying cluster',
+          body: 'Cluster will be forgotten when destroy completes.',
+        });
+        nav({ to: '/deployments/$deploymentId', params: { deploymentId: resp.deployment_id } });
+      } else {
+        push({ kind: 'success', title: 'Cluster forgotten', body: 'Configuration and Vault secrets removed.' });
+        nav({ to: '/clusters', replace: true });
+      }
     },
     onError: (err: unknown) =>
       push({ kind: 'error', title: 'Could not forget cluster', body: errMessage(err, 'unknown') }),
@@ -183,10 +213,19 @@ export function ClusterOverview() {
       href: { to: '/clusters/$clusterId/initialize', params: { clusterId } },
     });
   }
-  // Forget mirrors the backend's deletableStatuses gate. After Destroy, the
-  // status flips to `destroyed` and this is the only way to clear the row off
-  // /clusters without hand-editing the DB.
-  if (status === 'pending' || status === 'initialized' || status === 'destroyed' || status === 'error') {
+  // Forget covers two cases:
+  //   - Non-live (pending/initialized/destroyed/error): drops the row directly.
+  //   - Live (ready/degraded): "destroy and forget" — backend kicks off
+  //     terraform destroy and completes the forget on success. Modal copy
+  //     spells out which path the click will take based on current status.
+  //
+  // Transient states (deploying/upgrading/destroying) intentionally omit the
+  // button — the operator must wait for the in-flight deployment to settle
+  // or cancel it via the deploy log page first.
+  if (
+    status === 'pending' || status === 'initialized' || status === 'destroyed' || status === 'error' ||
+    status === 'ready' || status === 'degraded'
+  ) {
     actions.push({ key: 'forget', destructive: true, label: 'Forget', icon: <Eraser size={14} />, onClick: () => setShowForget(true) });
   }
   actions.push({ key: 'kubeconfig', spacerBefore: true, small: true, label: 'kubeconfig', icon: <Download size={13} />, comingSoon: true });
@@ -335,6 +374,7 @@ export function ClusterOverview() {
       {showForget ? (
         <ForgetClusterModal
           clusterName={c.name}
+          cascade={isLiveStatus(status)}
           onClose={() => setShowForget(false)}
           onConfirm={() => forget.mutate()}
           pending={forget.isPending}
