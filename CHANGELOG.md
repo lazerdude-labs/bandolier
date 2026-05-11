@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] — 2026-05-11
+
+The Ansible tab in the deploy log stream now renders human-readable playbook output instead of one JSON blob per ansible-runner event. Closes #32. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.11` (or `:0.1` / `:latest`) to upgrade.
+
+### Fixed
+
+- **Ansible log tab no longer renders raw JSON.** Through v0.1.10, every `ansible_event` arriving on the deploy stream was rendered as `JSON.stringify(e.data)` — a wall of unreadable structured-event blobs. The backend already publishes the pre-formatted human-readable line (ansible-runner emits both the structured event AND the line `ansible-playbook` would print to a terminal as `event_data.stdout`) — the UI just wasn't reading it. `ui/src/components/LogStream.tsx` now (a) prefers `e.data.stdout`, (b) splits multi-line stdout (PLAY RECAP block, multi-line failure messages with stderr, etc.) into one log row per terminal line so the search filter + virtualization work per-line, (c) silently drops events with empty stdout (internal `playbook_on_start` / `playbook_on_play_start` events that have their human-visible counterpart on a different event). The existing ANSI parser in LogStream already colors `TASK [...]` headers (cyan), `ok:` (green), `changed:` (yellow), and `fatal:` / `FAILED!` (red) without extra work. Line numbers in the gutter now use the rendered row's position rather than the event index to stay monotonic across multi-line splits. LogLine `id` switched to a `"${eventIdx}-${lineIdx}"` string key (caught in review) so a single ansible task emitting more than 1000 stdout lines (large `debug` or verbose `shell` output) can't produce React-key collisions and silent rendering corruption.
+
 ## [0.1.10] — 2026-05-11
 
 End-to-end perf rework of the cluster Apps catalog page. The catalog tab was opening with a multi-second hang and laggy typing because it rendered all 5,000–6,000 chart entries (bitnami + grafana + prometheus-community + traefik + curated) as un-virtualized DOM nodes, refiltered synchronously on every keystroke, and pulled a ~3.3 MB JSON payload on every load. v0.1.10 ships virtualization, deferred search, server-side filter+pagination, and parallel backend helm searches. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.10` (or `:0.1` / `:latest`) to upgrade.
