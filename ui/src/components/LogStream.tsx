@@ -3,7 +3,13 @@ import { Search, Pause, Play, Copy as CopyIcon } from 'lucide-react';
 import type { DeploymentEvent } from '@/lib/ws';
 
 type Tab = 'all' | 'stdout' | 'stderr' | 'ansible';
-type LogLine = { id: number; stream: 'stdout' | 'stderr' | 'ansible'; text: string; ts: string };
+// id is a stable React-key per row. Strings (not numbers) because a single
+// ansible_event can carry hundreds of lines from a `debug` task or verbose
+// `shell` output; the previous `eventIdx * 1000 + lineIdx` numeric scheme
+// could collide when an event produced >= 1000 stdout lines and silently
+// corrupt rendering. `${eventIdx}-${lineIdx}` is collision-free by
+// construction.
+type LogLine = { id: string; stream: 'stdout' | 'stderr' | 'ansible'; text: string; ts: string };
 
 const ansiToClass: Record<string, string> = {
   '30': 'ansi-gray', '31': 'ansi-red', '32': 'ansi-green', '33': 'ansi-yellow',
@@ -68,10 +74,30 @@ export function LogStream({ events, reconnectIn }: { events: DeploymentEvent[]; 
   const lines: LogLine[] = useMemo(() => {
     return events.flatMap((e, i) => {
       if (e.type === 'log' && e.text) {
-        return [{ id: i, stream: (e.stream as 'stdout' | 'stderr') ?? 'stdout', text: e.text, ts: e.ts }];
+        return [{ id: `${i}-0`, stream: (e.stream as 'stdout' | 'stderr') ?? 'stdout', text: e.text, ts: e.ts }];
       }
       if (e.type === 'ansible_event') {
-        return [{ id: i, stream: 'ansible' as const, text: JSON.stringify(e.data), ts: e.ts }];
+        // ansible-runner emits both the structured event (e.data) AND a
+        // pre-formatted human-readable line (e.data.stdout) matching what
+        // `ansible-playbook` would print to a terminal. Prefer the stdout
+        // line. Empty stdout = internal event (playbook_on_start, etc.)
+        // whose human-visible counterpart fires under a different event;
+        // dropping silently is safe — every line ansible prints surfaces
+        // under exactly one event. Closes issue #32.
+        const stdout = (e.data as { stdout?: string } | null)?.stdout ?? '';
+        if (!stdout) return [] as LogLine[];
+        // Multi-line stdout (PLAY RECAP block, multi-line stderr from a
+        // failed task, large `debug` task output, etc.) splits to one
+        // LogLine per terminal line so the search filter + virtualization
+        // work per-line. ID is "${eventIdx}-${lineIdx}" — collision-free
+        // by construction regardless of how many lines an individual
+        // ansible task emits.
+        return stdout.split('\n').map((line, j) => ({
+          id: `${i}-${j}`,
+          stream: 'ansible' as const,
+          text: line,
+          ts: e.ts,
+        }));
       }
       return [] as LogLine[];
     });
@@ -168,9 +194,14 @@ export function LogStream({ events, reconnectIn }: { events: DeploymentEvent[]; 
       </div>
 
       <div className="logstream-body" ref={ref} onScroll={onScroll}>
-        {filtered.map((l) => (
+        {filtered.map((l, idx) => (
+          // Visible line number is the row's position in the current
+          // filter view, not l.id — the id field encodes event index ×
+          // 1000 + intra-event line offset (to disambiguate multi-line
+          // ansible_event stdout), which would otherwise render as
+          // sparse, non-monotonic line numbers in the gutter.
           <div key={l.id} className={`logline ${l.stream}`}>
-            <span className="ln">{l.id + 1}</span>
+            <span className="ln">{idx + 1}</span>
             <span className="ts">{l.ts.slice(11, 19)}</span>
             <span className="text">{highlight(l.text, search)}</span>
           </div>
