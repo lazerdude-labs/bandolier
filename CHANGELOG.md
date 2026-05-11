@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] — 2026-05-11
+
+End-to-end perf rework of the cluster Apps catalog page. The catalog tab was opening with a multi-second hang and laggy typing because it rendered all 5,000–6,000 chart entries (bitnami + grafana + prometheus-community + traefik + curated) as un-virtualized DOM nodes, refiltered synchronously on every keystroke, and pulled a ~3.3 MB JSON payload on every load. v0.1.10 ships virtualization, deferred search, server-side filter+pagination, and parallel backend helm searches. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.10` (or `:0.1` / `:latest`) to upgrade.
+
+### Changed
+
+- **Catalog API response shape: `{entries, total}` wrapper.** `GET /api/clusters/{id}/apps/catalog` previously returned `CatalogEntry[]` directly; v0.1.10 wraps in `CatalogResponse {entries: CatalogEntry[], total: number}` so the UI can render "Showing N of M" against server-side filter+pagination results. Breaking on the api contract, but the api + ui ship together via docker compose — no external consumer to break.
+- **Catalog tab defaults to the `Curated` source filter** instead of `All`. 99% of homelab operators want Traefik + the homelab-starter bundle, not the 5000-chart bitnami firehose. The `All` pill is still one click away.
+- **Catalog source pills render with the default seeded repos pre-populated** (curated + bitnami + grafana + prometheus-community + traefik) so the pill row is interactive before the first fetch resolves. Operator-added custom repos still appear as pills, but only after the catalog has been fetched at least once — minor regression vs v0.1.9 which derived the entire pill list from the response (and so didn't render any pills until the first fetch returned).
+
+### Added
+
+- **Server-side query params on `GET /api/clusters/{id}/apps/catalog`**: `?search=`, `?source=`, `?limit=`, `?offset=`. All optional. Search is case-insensitive substring match against name + description; source is exact match against the source field (empty or `all` disables); limit is bounded `0–500` (0 = no limit); offset is `>= 0`. Out-of-range values return 400. Filter runs in-memory against the 60s aggregate cache, so per-request filter is cheap.
+- **`@tanstack/react-virtual` for the catalog row list** (~4 KB gzip, same vendor family as react-query + react-router). The catalog scroller renders only the visible rows ± an 8-row overscan, so DOM node count stays under 200 even when "All" is selected with 6000 entries. `estimateSize: () => 53` matches the current row CSS; the virtualizer auto-measures actual heights via `measureElement` and self-corrects.
+- **`useDeferredValue` on the search input.** React 19's primitive defers the filter refetch to a low-priority render — the input stays bound to `search` for snappy typing while the query that hits the api consumes `deferredSearch`. Zero-dep, idiomatic React 19, doesn't add the artificial latency a setTimeout-based debounce would.
+- **Catalog tab a11y**: scroller is `role="list"` with `aria-label="chart catalog"`, rows are `role="listitem"`. Search input has `aria-label="search charts"`. Costs nothing, makes the page keyboard/SR navigable.
+
+### Performance
+
+- **Parallel helm SearchRepo + RepoAdd in `Catalog.Aggregate`.** Bounded to 4 concurrent goroutines via `errgroup.WithContext().SetLimit(4)`. Cuts cache-miss latency from ~10–25s sequential (4-5 repos × 2-5s each) to ~3–5s parallel. Best-effort semantics preserved — a single repo failing to add or search is logged via `slog.Warn` and the repo is skipped, matching v0.1.0–v0.1.9 behavior. Aggregate cache (60s TTL) still absorbs subsequent requests.
+- **Catalog refactor lifts the store dependency to a tiny `catalogRepoLister` interface** so tests can substitute a fake without spinning up the SQLite-backed `store.Store`. Constructor signature unchanged (`NewCatalog(*Store)`); explicit nil-check at construction time keeps the Go interface-nil gotcha from breaking the `c.store != nil` guard inside Aggregate.
+
 ## [0.1.9] — 2026-05-11
 
 The Traefik helm chart version pinned through v0.1.0–v0.1.8 (`34.2.1`) was never actually published by the chart maintainer — the 34.x series went 34.2.0 → 34.3.0 directly. Every cleanly-running deploy that reached the `helm.install_traefik` step failed with `no chart version found for traefik-34.2.1`. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.9` (or `:0.1` / `:latest`) to upgrade.

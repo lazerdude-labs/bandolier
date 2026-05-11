@@ -5,6 +5,15 @@ package apps
 
 import "time"
 
+// CatalogResponse wraps the catalog endpoint payload so the UI can show
+// "Showing N of M" pagination/filter context without a separate count
+// endpoint. Entries holds the post-filter slice (possibly paginated);
+// Total holds the count of all matching entries before pagination.
+type CatalogResponse struct {
+	Entries []CatalogEntry `json:"entries"`
+	Total   int            `json:"total"`
+}
+
 // CatalogEntry is one row in the operator-visible chart catalog. Curated
 // entries set Source = "curated"; remote-repo entries set Source to the repo
 // name (e.g. "bitnami").

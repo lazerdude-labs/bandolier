@@ -364,8 +364,36 @@ export type InitializeView = {
 export const getClusterInit = (clusterID: string) =>
   api<InitializeView>('GET', `/api/clusters/${clusterID}/initialize`);
 
-export const listCatalog = (clusterID: string) =>
-  api<CatalogEntry[]>('GET', `/api/clusters/${clusterID}/apps/catalog`);
+// CatalogResponse wraps the catalog endpoint payload (v0.1.10+). Pre-v0.1.10
+// the endpoint returned CatalogEntry[] directly; the wrapper now carries a
+// total count so the UI can render "Showing N of M" against server-side
+// filter+pagination results.
+export type CatalogResponse = { entries: CatalogEntry[]; total: number };
+
+// CatalogQuery threads server-side filter+pagination params through to the
+// catalog endpoint. All fields are optional; omitting them returns the
+// unfiltered, unpaginated catalog (same as v0.1.9 behavior).
+export type CatalogQuery = {
+  search?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export const listCatalog = (clusterID: string, q: CatalogQuery = {}) => {
+  const params = new URLSearchParams();
+  if (q.search) params.set('search', q.search);
+  // "all" is a UI convenience sentinel — server treats empty + "all" the
+  // same, but we elide it from the wire to keep query keys/URLs clean.
+  if (q.source && q.source !== 'all') params.set('source', q.source);
+  if (q.limit != null) params.set('limit', String(q.limit));
+  if (q.offset != null) params.set('offset', String(q.offset));
+  const qs = params.toString();
+  return api<CatalogResponse>(
+    'GET',
+    `/api/clusters/${clusterID}/apps/catalog${qs ? `?${qs}` : ''}`,
+  );
+};
 export const listReleases = (clusterID: string) =>
   api<Release[]>('GET', `/api/clusters/${clusterID}/apps/releases`);
 export const listRepos = (clusterID: string) =>

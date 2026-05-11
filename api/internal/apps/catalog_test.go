@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -139,4 +141,165 @@ func TestCatalogAggregateUsesCache(t *testing.T) {
 	if len(out2) != len(out1) {
 		t.Fatalf("cached aggregation drift: %d vs %d", len(out2), len(out1))
 	}
+}
+
+// TestFilterCatalog walks the filter+pagination matrix. Pure-function helper
+// so no setup beyond an input slice.
+func TestFilterCatalog(t *testing.T) {
+	all := []CatalogEntry{
+		{Source: "curated", Name: "traefik", Description: "Default ingress controller for Bandolier clusters."},
+		{Source: "curated", Name: "homelab-starter", Description: "Curated bundle of starter apps."},
+		{Source: "bitnami", Name: "nginx", Description: "NGINX web server."},
+		{Source: "bitnami", Name: "postgres", Description: "PostgreSQL database."},
+		{Source: "bitnami", Name: "redis", Description: "In-memory data store."},
+		{Source: "grafana", Name: "grafana", Description: "Open source visualization."},
+	}
+	cases := []struct {
+		name        string
+		search      string
+		source      string
+		limit       int
+		offset      int
+		wantNames   []string
+		wantTotal   int
+	}{
+		{"no filter, no paginate", "", "", 0, 0, []string{"traefik", "homelab-starter", "nginx", "postgres", "redis", "grafana"}, 6},
+		{"source=curated", "", "curated", 0, 0, []string{"traefik", "homelab-starter"}, 2},
+		{"source=all is equivalent to no source", "", "all", 0, 0, []string{"traefik", "homelab-starter", "nginx", "postgres", "redis", "grafana"}, 6},
+		{"search=post matches postgres only", "post", "", 0, 0, []string{"postgres"}, 1},
+		{"search is case-insensitive", "PoSt", "", 0, 0, []string{"postgres"}, 1},
+		{"search matches description too", "ingress", "", 0, 0, []string{"traefik"}, 1},
+		{"search + source combined", "g", "bitnami", 0, 0, []string{"nginx", "postgres"}, 2},
+		{"limit truncates result", "", "bitnami", 2, 0, []string{"nginx", "postgres"}, 3},
+		{"offset advances", "", "bitnami", 0, 1, []string{"postgres", "redis"}, 3},
+		{"limit + offset together", "", "bitnami", 1, 1, []string{"postgres"}, 3},
+		{"offset >= total returns empty but real total", "", "bitnami", 0, 99, []string{}, 3},
+		{"no match", "zzzzz-no-match", "", 0, 0, []string{}, 0},
+		{"negative offset clamps to 0", "", "curated", 0, -5, []string{"traefik", "homelab-starter"}, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, total := FilterCatalog(all, tc.search, tc.source, tc.limit, tc.offset)
+			if total != tc.wantTotal {
+				t.Errorf("total: got %d want %d", total, tc.wantTotal)
+			}
+			if len(got) != len(tc.wantNames) {
+				t.Fatalf("count: got %d want %d (names=%v)", len(got), len(tc.wantNames), namesOf(got))
+			}
+			for i, want := range tc.wantNames {
+				if got[i].Name != want {
+					t.Errorf("entry %d: got %q want %q", i, got[i].Name, want)
+				}
+			}
+		})
+	}
+}
+
+func namesOf(es []CatalogEntry) []string {
+	out := make([]string, 0, len(es))
+	for _, e := range es {
+		out = append(out, e.Name)
+	}
+	return out
+}
+
+// blockingHelm counts concurrent in-flight SearchRepo calls. Used to verify
+// that Aggregate's errgroup concurrency cap is respected. The arrival
+// channel fires once per goroutine entering SearchRepo, before it blocks
+// on the gate — lets the test confirm the expected concurrency level
+// before releasing, removing all timing flakiness.
+type blockingHelm struct {
+	stubHelm
+	arrive    chan struct{} // signaled when a goroutine enters SearchRepo
+	gate      chan struct{} // closes to release blocked goroutines
+	concur    atomic.Int32
+	maxConcur atomic.Int32
+}
+
+func (b *blockingHelm) SearchRepo(ctx context.Context, name string) ([]CatalogEntry, error) {
+	now := b.concur.Add(1)
+	defer b.concur.Add(-1)
+	// Track high-water mark.
+	for {
+		peak := b.maxConcur.Load()
+		if now <= peak || b.maxConcur.CompareAndSwap(peak, now) {
+			break
+		}
+	}
+	b.arrive <- struct{}{}
+	<-b.gate
+	return []CatalogEntry{
+		{Source: name, Name: name + "-chart", Chart: name + "/" + name + "-chart"},
+	}, nil
+}
+
+// TestAggregateRespectsConcurrencyCap asserts that more than
+// aggregateParallelism repos don't all run helm SearchRepo simultaneously.
+// Dispatches 8 repos against a blocking stub, waits for exactly
+// aggregateParallelism goroutines to confirm in-flight via the arrive
+// channel, then releases the gate. The wait is the synchronization point
+// — no time.Sleep, no flakiness on slow CI runners.
+func TestAggregateRespectsConcurrencyCap(t *testing.T) {
+	st := &fakeRepoStore{}
+	for i := 0; i < 8; i++ {
+		st.repos = append(st.repos, Repo{Name: "repo-" + string(rune('a'+i)), URL: "https://example.test/charts"})
+	}
+	cat := &Catalog{store: st, cache: newCatalogCache(time.Hour)}
+	helm := &blockingHelm{
+		arrive: make(chan struct{}, 16),
+		gate:   make(chan struct{}),
+	}
+
+	// Wait for exactly aggregateParallelism goroutines to be in-flight,
+	// then release. Confirms the cap is observed (extra goroutines stay
+	// queued behind the errgroup's SetLimit gate, not in SearchRepo).
+	released := make(chan struct{})
+	go func() {
+		for i := 0; i < aggregateParallelism; i++ {
+			<-helm.arrive
+		}
+		// Briefly let any 5th goroutine try to enter — if SetLimit is
+		// broken, it would arrive and bump maxConcur past the cap.
+		// Drain any spurious arrivals via a short non-blocking peek
+		// before releasing.
+		select {
+		case <-helm.arrive:
+			// More than aggregateParallelism in-flight — let it through,
+			// the maxConcur assertion below will catch it.
+			helm.arrive <- struct{}{} // restore so SearchRepo can re-emit on next call
+		case <-time.After(50 * time.Millisecond):
+		}
+		close(helm.gate)
+		close(released)
+	}()
+
+	if _, err := cat.Aggregate(context.Background(), "c1", helm); err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	<-released
+
+	peak := helm.maxConcur.Load()
+	if peak <= 0 {
+		t.Fatalf("expected peak concurrency > 0, got %d", peak)
+	}
+	if int(peak) > aggregateParallelism {
+		t.Errorf("peak concurrency %d exceeded cap %d", peak, aggregateParallelism)
+	}
+}
+
+// fakeRepoStore satisfies the subset of *store.Store that Catalog needs
+// (ListRepos). Defined here rather than reused from store_test.go to keep
+// the dependency direction simple — catalog tests should not depend on
+// store internals beyond the interface they actually use.
+type fakeRepoStore struct {
+	mu    sync.Mutex
+	repos []Repo
+}
+
+func (s *fakeRepoStore) ListRepos(ctx context.Context, clusterID string) ([]Repo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Repo, len(s.repos))
+	copy(out, s.repos)
+	return out, nil
 }
