@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] — 2026-05-11
+
+The Traefik helm chart version pinned through v0.1.0–v0.1.8 (`34.2.1`) was never actually published by the chart maintainer — the 34.x series went 34.2.0 → 34.3.0 directly. Every cleanly-running deploy that reached the `helm.install_traefik` step failed with `no chart version found for traefik-34.2.1`. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.9` (or `:0.1` / `:latest`) to upgrade.
+
+### Fixed
+
+- **Traefik chart version bumped to `34.5.0`.** The latest patch in the 34.x series — the series this codebase was originally tested against. Single source of truth via `apps.TraefikDefaultChartVersion`, referenced by both the curated catalog entry (so the UI shows the right version) and the deploy executor's `traefikChartVersion()` helper (the actual install target). Cross-package const reference replaces the previous "kept in sync by code comment" pattern that originally let the executor's hardcoded `34.2.1` drift independently of any other version source. Operators on v0.1.0–v0.1.8 whose deploys died at `helm.install_traefik` only need to upgrade and click Retry — the earlier steps in the pipeline (terraform, ansible, dns, tls) are idempotent, so the retry only spends time on the Traefik install.
+
+### Added
+
+- **`BANDOLIER_TRAEFIK_CHART_VERSION` env var overrides the pinned chart version.** Useful when Traefik yanks a version (history repeats — the 34.2.1 typo was the first instance and won't be the last), when an operator wants a specific newer release, or when running against a fork / internal mirror. Validated against a semver allowlist (`^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`) — malformed values fall through to the pinned default with a `slog.Warn` line ("BANDOLIER_TRAEFIK_CHART_VERSION rejected, falling back to default") so operators can tell their override was ignored rather than silently deploying the default. Pre-release tags (e.g. `39.1.0-ea.1`) are accepted; v-prefixed values (`v34.5.0`) are rejected since helm chart versions don't carry the v prefix.
+
 ## [0.1.8] — 2026-05-11
 
 Two operator-experience fixes uncovered by a real v0.1.7 deploy: the wizard could silently skip its SSH step when the operator pressed Enter inside a network input, and the VLAN field rejected the documented "0 for untagged" value. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.8` (or `:0.1` / `:latest`) to upgrade.

@@ -14,8 +14,9 @@ If you've hit something not on this list, please open an issue with the **Bug re
 4. [Storage doesn't exist (`local-lvm`, etc.)](#storage-doesnt-exist-local-lvm-etc)
 5. [Vault PKI: `unknown role: traefik` at TLS step](#vault-pki-unknown-role-traefik-at-tls-step)
 6. [Deploy log stream returns 403 from a remote browser](#deploy-log-stream-returns-403-from-a-remote-browser)
-7. [Working directly with the live cluster workspace](#working-directly-with-the-live-cluster-workspace)
-8. [Lock-file mismatch after a manual edit](#lock-file-mismatch-after-a-manual-edit)
+7. [Traefik helm install fails: chart version not found](#traefik-helm-install-fails-chart-version-not-found)
+8. [Working directly with the live cluster workspace](#working-directly-with-the-live-cluster-workspace)
+9. [Lock-file mismatch after a manual edit](#lock-file-mismatch-after-a-manual-edit)
 
 ---
 
@@ -206,6 +207,60 @@ BANDOLIER_WS_ORIGIN_PATTERNS: "bandolier.lab.internal,10.10.10.50"
 ```
 
 Patterns use `path.Match` semantics; `*.lab.internal` matches any subdomain. A bare `*` is dropped at parse time (would re-open CSRF). Apply with `docker compose up -d`.
+
+---
+
+## Traefik helm install fails: chart version not found
+
+**Fixed in v0.1.9** — the pinned Traefik chart version was bumped from `34.2.1` (never published — Traefik went 34.2.0 → 34.3.0 directly) to `34.5.0` (last patch in the 34.x series). If you're on v0.1.0–v0.1.8 and your deploy died at `helm.install_traefik` with "no chart version found for traefik-34.2.1", just upgrade and click Retry on the deploy.
+
+### Symptoms
+
+```
+Error: INSTALLATION FAILED: chart "traefik" matching 34.2.1 not found
+in traefik index. (try 'helm repo update'): no chart version found for
+traefik-34.2.1
+Deployment failed: traefik install: exit status 1.
+```
+
+All earlier steps succeeded (`terraform.init/apply`, `wait_for_ssh`, `ansible`, `join_token`, `dns.write_wildcard`, `tls.issue_wildcard` all green) — the VMs are up, k3s is installed, only Traefik is missing.
+
+### Fix (recommended: upgrade)
+
+Pull `ghcr.io/lazerdude-labs/bandolier/api:0.1.9` (or `:0.1` / `:latest`), `docker compose up -d`, then **Retry** on the failed deploy. The earlier steps are idempotent — terraform plans a no-op, Ansible re-applies cleanly, the cert is reused — so the retry only spends time on the Traefik install.
+
+### Fix (override the version without upgrading)
+
+Set `BANDOLIER_TRAEFIK_CHART_VERSION` (v0.1.9+) on the api container to pin a different version — useful if Traefik yanks `34.5.0` later, or you want a specific newer version (35.x, 39.x, etc.):
+
+```yaml
+# deploy/docker-compose.yml — under api: environment:
+BANDOLIER_TRAEFIK_CHART_VERSION: "34.4.1"
+```
+
+`docker compose up -d` and Retry. Values are validated against a semver allowlist; malformed values silently fall through to the default rather than failing mid-deploy.
+
+### Fix (manual install on the live cluster)
+
+If you can't upgrade Bandolier right now, install Traefik directly via helm against the cluster's kubeconfig. The kubeconfig is in Vault at `clusters/<id>/kubeconfig`. Bandolier will keep the cluster in `error` state but the cluster itself will be functional:
+
+```bash
+# On the Bandolier host — pull kubeconfig from Vault
+ROOT_TOKEN=$(sudo docker exec deploy-vault-agent-1 jq -r .root_token /state/init.json)
+KCFG=$(sudo docker exec -e VAULT_TOKEN="$ROOT_TOKEN" deploy-vault-agent-1 sh -c '
+  curl -fsS -H "X-Vault-Token: $VAULT_TOKEN" \
+    "$VAULT_ADDR/v1/bandolier/data/clusters/<your-cluster-id>/kubeconfig" \
+  | jq -r .data.data.kubeconfig
+')
+echo "$KCFG" > /tmp/kcfg.yaml
+helm --kubeconfig=/tmp/kcfg.yaml repo add traefik https://traefik.github.io/charts
+helm --kubeconfig=/tmp/kcfg.yaml repo update
+helm --kubeconfig=/tmp/kcfg.yaml install traefik traefik/traefik \
+  --version 34.5.0 --namespace kube-system \
+  --set tlsStore.default.defaultCertificate.secretName=bandolier-wildcard-tls
+```
+
+The cluster will function but Bandolier's state will read `error` until a subsequent deploy completes the pipeline (or you Forget + redeploy).
 
 ---
 

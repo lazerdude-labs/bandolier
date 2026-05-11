@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// TraefikDefaultChartVersion is the single source of truth for the Traefik
+// helm chart version Bandolier ships with. Used both by the curated catalog
+// entry below (so the UI shows the correct version) and by the deploy
+// executor's traefikChartVersion() helper (the actual install target).
+// Cross-package referencing prevents the kind of drift the v0.1.0-v0.1.8
+// codebase had — where the executor's hardcoded "34.2.1" was independent
+// of any other version source.
+const TraefikDefaultChartVersion = "34.5.0"
+
 // Helm is the abstract surface the catalog/handlers use to talk to helm. The
 // concrete HelmCLI shell-out wrapper in helm.go satisfies this; tests
 // substitute a stub.
@@ -37,8 +46,11 @@ var curated = []CatalogEntry{
 		Chart:             "traefik/traefik",
 		Type:              "chart",
 		Description:       "Default ingress controller for Bandolier clusters.",
-		LatestVersion:     "34.2.1",
-		AvailableVersions: []string{"34.2.1"},
+		// Version sourced from TraefikDefaultChartVersion (top of file)
+		// so a future bump touches one location. v0.1.x bumped from a
+		// never-published "34.2.1" to 34.5.0 — see the const's docstring.
+		LatestVersion:     TraefikDefaultChartVersion,
+		AvailableVersions: []string{TraefikDefaultChartVersion},
 		System:            true,
 		IngressValuePath:  "ingress.hostname",
 		Icon:              "shield",
