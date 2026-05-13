@@ -85,6 +85,34 @@ func TestCatalogMergeCurated(t *testing.T) {
 	}
 }
 
+// TestCatalogMergeCuratedBundleNoChartShadow pins the v0.1.12 fix that
+// bundle entries (Type == "bundle", Chart == "") don't register the
+// empty string as a dedup key. Without the fix, a malformed repo entry
+// returning an empty Chart would be silently swallowed by mergeCurated's
+// shadowing logic.
+func TestCatalogMergeCuratedBundleNoChartShadow(t *testing.T) {
+	repoEntries := []CatalogEntry{
+		{Source: "bitnami", Name: "well-formed", Chart: "bitnami/well-formed", LatestVersion: "1.0.0"},
+		// Simulate a malformed helm-search row: empty Chart. Should NOT
+		// be shadowed by the bundle below.
+		{Source: "bitnami", Name: "edge-case", Chart: "", LatestVersion: "1.0.0"},
+	}
+	curatedSeed := []CatalogEntry{
+		{Source: "curated", Name: "homelab-essentials", Type: "bundle", Chart: ""},
+	}
+	merged := mergeCurated(repoEntries, curatedSeed)
+
+	var sawEdgeCase bool
+	for _, e := range merged {
+		if e.Name == "edge-case" {
+			sawEdgeCase = true
+		}
+	}
+	if !sawEdgeCase {
+		t.Fatalf("repo entry with empty Chart was incorrectly shadowed by bundle: %+v", merged)
+	}
+}
+
 func TestCatalogCacheTTL(t *testing.T) {
 	c := newCatalogCache(50 * time.Millisecond)
 	entries := []CatalogEntry{{Source: "bitnami", Name: "x", Chart: "bitnami/x"}}
@@ -148,7 +176,7 @@ func TestCatalogAggregateUsesCache(t *testing.T) {
 func TestFilterCatalog(t *testing.T) {
 	all := []CatalogEntry{
 		{Source: "curated", Name: "traefik", Description: "Default ingress controller for Bandolier clusters."},
-		{Source: "curated", Name: "homelab-starter", Description: "Curated bundle of starter apps."},
+		{Source: "curated", Name: "homelab-essentials", Description: "Curated bundle of starter apps."},
 		{Source: "bitnami", Name: "nginx", Description: "NGINX web server."},
 		{Source: "bitnami", Name: "postgres", Description: "PostgreSQL database."},
 		{Source: "bitnami", Name: "redis", Description: "In-memory data store."},
@@ -163,9 +191,9 @@ func TestFilterCatalog(t *testing.T) {
 		wantNames   []string
 		wantTotal   int
 	}{
-		{"no filter, no paginate", "", "", 0, 0, []string{"traefik", "homelab-starter", "nginx", "postgres", "redis", "grafana"}, 6},
-		{"source=curated", "", "curated", 0, 0, []string{"traefik", "homelab-starter"}, 2},
-		{"source=all is equivalent to no source", "", "all", 0, 0, []string{"traefik", "homelab-starter", "nginx", "postgres", "redis", "grafana"}, 6},
+		{"no filter, no paginate", "", "", 0, 0, []string{"traefik", "homelab-essentials", "nginx", "postgres", "redis", "grafana"}, 6},
+		{"source=curated", "", "curated", 0, 0, []string{"traefik", "homelab-essentials"}, 2},
+		{"source=all is equivalent to no source", "", "all", 0, 0, []string{"traefik", "homelab-essentials", "nginx", "postgres", "redis", "grafana"}, 6},
 		{"search=post matches postgres only", "post", "", 0, 0, []string{"postgres"}, 1},
 		{"search is case-insensitive", "PoSt", "", 0, 0, []string{"postgres"}, 1},
 		{"search matches description too", "ingress", "", 0, 0, []string{"traefik"}, 1},
@@ -175,7 +203,7 @@ func TestFilterCatalog(t *testing.T) {
 		{"limit + offset together", "", "bitnami", 1, 1, []string{"postgres"}, 3},
 		{"offset >= total returns empty but real total", "", "bitnami", 0, 99, []string{}, 3},
 		{"no match", "zzzzz-no-match", "", 0, 0, []string{}, 0},
-		{"negative offset clamps to 0", "", "curated", 0, -5, []string{"traefik", "homelab-starter"}, 2},
+		{"negative offset clamps to 0", "", "curated", 0, -5, []string{"traefik", "homelab-essentials"}, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -27,6 +27,13 @@ var factoryRepos = []struct{ Name, URL string }{
 	{Name: "grafana", URL: "https://grafana.github.io/helm-charts"},
 	{Name: "prometheus-community", URL: "https://prometheus-community.github.io/helm-charts"},
 	{Name: "traefik", URL: "https://traefik.github.io/charts"},
+	// longhorn + wikijs added in v0.1.12 for the homelab-essentials
+	// bundle (see api/internal/apps/catalog.go). longhorn provides the
+	// cluster's persistent storage substrate; wikijs is hosted at the
+	// project's own subdomain (charts.js.wiki) by Christian Huth — a
+	// third-party maintainer the upstream Wiki.js team points to.
+	{Name: "longhorn", URL: "https://charts.longhorn.io"},
+	{Name: "wikijs", URL: "https://charts.js.wiki"},
 }
 
 // Sentinel errors used by destroy and downstream handlers.

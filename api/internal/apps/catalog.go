@@ -61,21 +61,79 @@ var curated = []CatalogEntry{
 		Tag:               "SYSTEM",
 	},
 	{
-		Source:            "curated",
-		Name:              "homelab-starter",
-		Type:              "bundle",
-		Description:       "Stub bundle. Real curated bundles ship in Phase 5.",
-		LatestVersion:     "v0.1",
-		AvailableVersions: []string{"v0.1"},
+		Source: "curated",
+		Name:   "homelab-essentials",
+		Type:   "bundle",
+		// One-line summary; the install modal shows this. Operators see
+		// the full per-chart breakdown (release, namespace, hostname,
+		// required/optional, helm-chart URL) once they open the modal.
+		Description:       "Storage (Longhorn) + observability (kube-prometheus-stack, Loki) + a wiki (Wiki.js). Optional charts can be deselected at install time.",
+		// Bundle version is the bundle's own semver, not any single
+		// chart's version. v1.0 = the four-chart shape shipped in
+		// Bandolier v0.1.12. A future change to the chart list or
+		// install ordering bumps this — chart-version bumps within
+		// the same shape don't.
+		LatestVersion:     "1.0.0",
+		AvailableVersions: []string{"1.0.0"},
 		Tag:               "BUNDLE",
+		Icon:              "box",
 		Charts: []BundleChart{
+			// 1. Storage. Required because the downstream charts (Prom
+			// PVCs, Loki PVCs, Wiki.js Postgres PVC) all want a real
+			// StorageClass. k3s's default `local-path` provisioner
+			// doesn't survive node loss, which is fine for a demo but
+			// wrong for "homelab essentials". Pinning Longhorn as the
+			// first chart in install order lets it set itself as the
+			// default StorageClass before the others provision PVCs.
 			{
-				Chart:     "bitnami/nginx",
-				Version:   "18.1.13",
-				Release:   "demo-nginx",
-				Namespace: "default",
+				Chart:     "longhorn/longhorn",
+				Version:   "1.11.2",
+				Release:   "longhorn",
+				Namespace: "longhorn-system",
 				Hostname:  "{release}.{fqdn}",
 				Required:  true,
+			},
+			// 2. Observability core. Bundles Prometheus + Grafana +
+			// Alertmanager + node-exporter + kube-state-metrics in one
+			// chart with ServiceMonitors pre-wired. Replaces the old
+			// "install Prom + Grafana separately and hope the exporters
+			// line up" pattern. Required because most downstream
+			// homelab charts assume a working scrape target.
+			{
+				Chart:     "prometheus-community/kube-prometheus-stack",
+				Version:   "85.0.2",
+				Release:   "kps",
+				Namespace: "monitoring",
+				Hostname:  "{release}.{fqdn}",
+				Required:  true,
+			},
+			// 3. Log aggregation. Optional — operators on resource-
+			// constrained clusters can skip Loki and rely on
+			// `kubectl logs` for the homelab scale they're at.
+			// Default chart deploys SimpleScalable mode (3 read/write/
+			// backend replicas each). v0.1.12 ships defaults; a future
+			// release can carry single-binary values when BundleChart
+			// gets a Values field.
+			{
+				Chart:     "grafana/loki",
+				Version:   "7.0.0",
+				Release:   "loki",
+				Namespace: "monitoring",
+				Hostname:  "",
+				Required:  false,
+			},
+			// 4. Wiki / notes. Wiki.js v2 (chart appVersion 2) via the
+			// community chart hosted at charts.js.wiki — third-party
+			// maintained but at a project-branded URL. Bundles a
+			// postgres subchart by default; operators who skip Wiki.js
+			// avoid the database footprint entirely. Optional.
+			{
+				Chart:     "wikijs/wiki",
+				Version:   "3.0.0",
+				Release:   "wiki",
+				Namespace: "wiki",
+				Hostname:  "{release}.{fqdn}",
+				Required:  false,
 			},
 		},
 	},
@@ -328,9 +386,20 @@ func FilterCatalog(entries []CatalogEntry, search, source string, limit, offset 
 // curated entry matches a repo entry by Chart ("repo/name"), the curated entry
 // wins — preserving the curated metadata (Icon, System, IngressValuePath, Tag).
 // Output is sorted by (Source, Name) for deterministic rendering.
+//
+// Bundles (Type == "bundle") set Chart to "" because they don't correspond
+// to a single upstream chart — they're a list of charts under one curated
+// entry. Without the empty-string skip below, every bundle would register
+// the "" key in curatedKeys and shadow any future malformed repo entry
+// whose Chart field came back blank from helm search (rare in practice
+// but a real edge case for meta-packages). The skip keeps dedup scoped
+// to actual chart shadowing.
 func mergeCurated(repoEntries, curatedSeed []CatalogEntry) []CatalogEntry {
 	curatedKeys := map[string]struct{}{}
 	for _, e := range curatedSeed {
+		if e.Chart == "" {
+			continue
+		}
 		curatedKeys[e.Chart] = struct{}{}
 	}
 	out := make([]CatalogEntry, 0, len(curatedSeed)+len(repoEntries))
