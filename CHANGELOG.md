@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] — 2026-05-13
+
+First real curated app bundle. Closes #35 (the previous `homelab-starter` stub was a single bitnami/nginx slot with a "real curated bundles ship in Phase 5" placeholder comment). v0.1.12 ships **`homelab-essentials`** — four charts that give a fresh cluster persistent storage, observability, and a wiki in one install. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.12` (or `:0.1` / `:latest`) to upgrade.
+
+### Added
+
+- **`homelab-essentials` curated bundle** in the Apps catalog. Four charts, all sourced from upstream or project-blessed Helm repositories (no `app-template` wrappers, no curated YAML required):
+  - **Longhorn** (`longhorn/longhorn` v1.11.2) — distributed block storage, marked **required** so downstream PVCs land on a real StorageClass rather than k3s's default `local-path` provisioner.
+  - **kube-prometheus-stack** (`prometheus-community/kube-prometheus-stack` v85.0.2) — Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics with ServiceMonitors pre-wired. Marked **required** since most downstream homelab charts assume working scrape targets.
+  - **Loki** (`grafana/loki` v7.0.0) — log aggregation. Optional; operators on resource-constrained clusters can skip.
+  - **Wiki.js** (`wikijs/wiki` v3.0.0, appVersion 2 — the stable Wiki.js v2 line) — traditional wiki with rich editor, search, and tag-based organization. Chart is hosted at the project's own `charts.js.wiki` subdomain (third-party maintained by Christian Huth, soft-blessed by the Wiki.js project's hosting choice). Optional; ships with a Postgres subchart so operators who skip Wiki.js avoid the database footprint entirely.
+- **Two new factory-seeded Helm repos**: `longhorn` (https://charts.longhorn.io) and `wikijs` (https://charts.js.wiki). Added to `factoryRepos` in `clusters/handlers.go` so every newly-created cluster gets them on first paint.
+
+### Operator notes
+
+- **Sequential install order** is Longhorn → kube-prometheus-stack → Loki → Wiki.js. Per `bundle.go`'s reverse-order rollback semantics, a Wiki.js failure leaves Longhorn + KPS + Loki installed; a Longhorn failure rolls everything back since nothing else installed yet.
+- **Cold-cluster StorageClass timing race.** `helm install longhorn/longhorn` returns "deployed" the moment the release lands in cluster state — the CRDs are present and the `longhorn-manager` DaemonSet is scheduled, but Longhorn's StorageClass reconciliation and default-StorageClass annotation take another 30–120 seconds while the manager pods finish pulling images and electing leadership. On a freshly-stood-up cluster with no pre-pulled images, the next chart in the bundle (KPS) may provision its PVCs against `local-path` (k3s's default) before Longhorn has promoted itself. If `kubectl get sc` shows `local-path (default)` after install, uninstall KPS, wait until `longhorn (default)` appears, then re-install KPS. A future release will likely add a bundle-level health gate between Longhorn and downstream charts; tracked separately.
+- **No `BundleChart.Values` schema field** in v0.1.12 — all four charts work with stock defaults for a homelab use case. Operators who want to tune (Loki single-binary mode, Wiki.js with an external Postgres, custom Grafana admin password) supply per-chart YAML via the existing install modal's values textarea. A future release will likely add bundle-supplied default values; tracked separately.
+- **First-run setup wizards** for Wiki.js and Grafana (KPS) generate their own admin accounts — no shipped default credentials. Wiki.js prompts on first hit; Grafana admin password lives in the `kps-grafana` secret (`kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d`).
+- **The `homelab-starter` stub** (one-chart `bitnami/nginx` demo with a "real bundles ship in Phase 5" comment) is removed. No operator was using it as a real bundle; rename is breaking only for tests that referenced the fixture string.
+
 ## [0.1.11] — 2026-05-11
 
 The Ansible tab in the deploy log stream now renders human-readable playbook output instead of one JSON blob per ansible-runner event. Closes #32. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.11` (or `:0.1` / `:latest`) to upgrade.
