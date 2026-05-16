@@ -122,6 +122,18 @@ func main() {
 	// The Executor publishes to the same deployments.Hub via a thin adapter so
 	// /ws/apps/installs/{id}/logs and /ws/deployments/{id}/logs share a backend.
 	appsStore := apps.NewStore(st)
+
+	// Reconcile factory Helm repos onto existing clusters. When a release
+	// adds a new factory repo (v0.1.12 added longhorn + wikijs), clusters
+	// created before that release miss the repo at create time and any
+	// bundle install referencing it fails with "repo not found". The
+	// reconciler is purely additive — see clusters/factory_repo_reconcile.go
+	// for the regression-vs-correctness tradeoff. Failure is non-fatal:
+	// existing clusters keep their current repo set, the boot continues.
+	if err := clusters.ReconcileFactoryRepos(ctx, st, appsStore); err != nil {
+		logger.Warn("factory repo reconcile failed", "err", err)
+	}
+
 	appsCatalog := apps.NewCatalog(appsStore)
 	helmFactory := apps.NewVaultHelmFactory(vaultClient, "helm")
 	hubAdapter := &hubEventAdapter{h: hub}

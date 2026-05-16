@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] — 2026-05-16
+
+Two real bugs surfaced when operators tried to install from the catalog tab on a v0.1.12 cluster. Both fixed. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.13` (or `:0.1` / `:latest`) to upgrade.
+
+### Fixed
+
+- **System charts can no longer be reinstalled from the catalog tab.** Operators trying to install Traefik from the catalog hit `IngressClass "traefik" ... cannot be imported into the current release: ... "meta.helm.sh/release-namespace" must equal "default": current value is "kube-system"`. Bandolier installs Traefik at cluster-deploy time (release `traefik` in `kube-system`); the cluster-scoped `IngressClass` resource is owned by that release. Helm refuses to import a cluster-scoped resource into a different release. The catalog entry has `System: true` and `Tag: "SYSTEM"` flags for exactly this case, but `CatalogTab.tsx` wasn't honoring `system` — only the `isInstalled` Set check, which can miss the system release if `helm list` is filtered or cached differently. `CatalogTab.tsx` now hard-blocks the install action for `system: true` entries and shows a `system` label with a hover-title explaining "System-managed; installed at cluster deploy. Do not install manually." The SYSTEM tag in the source column still appears alongside it.
+- **Pre-v0.1.12 clusters now get the v0.1.12 factory repos (longhorn + wikijs) at the next api boot.** `factoryRepos` (now exported as `FactoryRepos`) seeds run only at cluster-create time. Clusters created before v0.1.12 missed the new repos, and any homelab-essentials bundle install on those clusters failed at `Error: INSTALLATION FAILED: repo longhorn not found`. New boot-time `clusters.ReconcileFactoryRepos` walks every cluster in the store, lists its current `apps_repos` rows, and inserts any missing factory entries. Wired into `cmd/api/main.go` after store init, before HTTP listen. Idempotent (subsequent boots are no-op); operator-added custom repos are untouched. Non-fatal on per-cluster errors — one bad cluster doesn't block reconciliation for everything else. Known minor regression: operators who deliberately removed a factory repo via the Repos tab will see it restored on the next boot. A future release may add a tombstone column if the regression matters in practice.
+
+### Changed
+
+- **`clusters.factoryRepos` → `clusters.FactoryRepos`** (exported). Same data, new visibility so the reconciler can read it. Construct sites (the `Handler.Create` seeding loop) updated. New `FactoryRepo` struct type to make the slice type passable across packages.
+
 ## [0.1.12] — 2026-05-13
 
 First real curated app bundle. Closes #35 (the previous `homelab-starter` stub was a single bitnami/nginx slot with a "real curated bundles ship in Phase 5" placeholder comment). v0.1.12 ships **`homelab-essentials`** — four charts that give a fresh cluster persistent storage, observability, and a wiki in one install. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.12` (or `:0.1` / `:latest`) to upgrade.
