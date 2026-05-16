@@ -66,3 +66,74 @@ func TestBuildUpgradeArgs(t *testing.T) {
 		t.Fatalf("missing --install: %s", joined)
 	}
 }
+
+// TestBuildInstallArgsIncludesTimeout pins the v0.1.14 timeout wiring.
+// Without --timeout, helm uses its 5m default and Longhorn first-install
+// times out before image pulls finish (see helm_timeout.go).
+func TestBuildInstallArgsIncludesTimeout(t *testing.T) {
+	t.Setenv("BANDOLIER_HELM_INSTALL_TIMEOUT", "")
+	args := buildInstallArgs(InstallRequest{
+		Chart: "longhorn/longhorn", Version: "1.11.2", ReleaseName: "longhorn",
+		Namespace: "longhorn-system",
+	}, "")
+	// Exact-pair match so a future regression that emits the duration as
+	// "15m0s" or some other shape is caught explicitly. Walk args to find
+	// the --timeout flag and verify the next arg is exactly "15m".
+	var timeoutIdx = -1
+	for i, a := range args {
+		if a == "--timeout" {
+			timeoutIdx = i
+			break
+		}
+	}
+	if timeoutIdx == -1 || timeoutIdx+1 >= len(args) {
+		t.Fatalf("--timeout flag not found in args: %v", args)
+	}
+	if got := args[timeoutIdx+1]; got != "15m" {
+		t.Errorf("--timeout value: got %q want %q (full args: %v)", got, "15m", args)
+	}
+}
+
+func TestHelmInstallTimeoutFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{"unset → default 15m", "", "15m"},
+		{"valid 30m → 30m", "30m", "30m"},
+		{"valid 1h → 1h", "1h", "1h"},
+		{"valid 600s → 600s", "600s", "600s"},
+		{"malformed → default", "30 min", "15m"},
+		{"v-prefix rejected → default", "v30m", "15m"},
+		{"shell injection rejected → default", "30m; rm -rf /", "15m"},
+		{"decimal rejected → default", "1.5h", "15m"},
+		{"unsupported unit rejected → default", "30d", "15m"},
+		// Zero-guard: 0s / 0m / 0h pass the regex but mean "no timeout"
+		// in helm, which would let a genuinely-stuck install hang
+		// forever. Fall back to the default flag.
+		{"zero-second timeout rejected → default", "0s", "15m"},
+		{"zero-minute timeout rejected → default", "0m", "15m"},
+		{"zero-hour timeout rejected → default", "0h", "15m"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BANDOLIER_HELM_INSTALL_TIMEOUT", tc.env)
+			got := helmInstallTimeoutFlag()
+			if got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHelmInstallTimeoutDurationZeroGuard verifies the duration helper
+// also rejects zero values — the slog.Warn line in the production code
+// catches operator misconfigurations that the flag helper might miss.
+func TestHelmInstallTimeoutDurationZeroGuard(t *testing.T) {
+	t.Setenv("BANDOLIER_HELM_INSTALL_TIMEOUT", "0s")
+	got := helmInstallTimeout()
+	if got != defaultHelmInstallTimeout {
+		t.Errorf("zero env value should fall back to default; got %v want %v", got, defaultHelmInstallTimeout)
+	}
+}

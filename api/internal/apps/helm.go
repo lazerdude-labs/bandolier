@@ -185,6 +185,12 @@ func buildInstallArgs(req InstallRequest, valuesPath string) []string {
 		"--namespace", req.Namespace,
 		"--create-namespace",
 		"--wait",
+		// Override helm's 5m install/upgrade-wait default. Heavy charts
+		// (Longhorn, kube-prometheus-stack, etc.) routinely exceed 5m on
+		// homelab clusters with cold image caches and DaemonSet rollouts.
+		// v0.1.14: default 15m, configurable via BANDOLIER_HELM_INSTALL_TIMEOUT.
+		// See apps/helm_timeout.go for the rationale.
+		"--timeout", helmInstallTimeoutFlag(),
 	}
 	if req.Atomic {
 		a = append(a, "--atomic")
