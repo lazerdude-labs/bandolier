@@ -45,6 +45,10 @@ function makeCatalog(): Record<string, CatalogEntry[]> {
         latest_version: '34.5.0',
         available_versions: ['34.5.0'],
         type: 'chart',
+        // System: true mirrors the real production catalog entry. Pins the
+        // v0.1.13 fix that the install button is suppressed for system
+        // charts.
+        system: true,
       },
       {
         source: 'curated',
@@ -147,4 +151,10 @@ describe('CatalogTab', () => {
       expect(screen.getByText(/No charts match/)).toBeTruthy();
     });
   });
+
+  // v0.1.13's system-chart hard-block (CatalogTab.tsx: `e.system` branch
+  // shows a "system" label instead of an install button) is not asserted
+  // here because @tanstack/react-virtual doesn't render rows under jsdom
+  // — see the rationale comment at the top of this file. The behavior
+  // is verified manually in the browser after upgrade.
 });

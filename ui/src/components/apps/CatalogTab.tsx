@@ -183,7 +183,22 @@ export function CatalogTab({ clusterId, clusterFqdn }: { clusterId: string; clus
                       </span>
                     </div>
                     <div>
-                      {e.type === 'bundle' ? (
+                      {e.system ? (
+                        // System charts are installed by Bandolier at cluster
+                        // deploy time (see api/internal/deployments/executor.go's
+                        // post-bootstrap Traefik step). Operators must not
+                        // reinstall — helm enforces release ownership on
+                        // cluster-scoped resources (IngressClass, etc.) and
+                        // refuses to import them into a second release. Block
+                        // the install button entirely; the SYSTEM tag in the
+                        // source column already advertises it as managed.
+                        <span
+                          className="text-muted-foreground text-[11px]"
+                          title="System-managed; installed at cluster deploy. Do not install manually."
+                        >
+                          system
+                        </span>
+                      ) : e.type === 'bundle' ? (
                         <button className="btn btn-outline btn-sm" onClick={() => setBundleInstalling(e)}>
                           install bundle
                         </button>

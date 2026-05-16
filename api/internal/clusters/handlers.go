@@ -18,11 +18,23 @@ import (
 	"github.com/lazerdude-labs/bandolier/api/internal/vault"
 )
 
-// factoryRepos seeds every newly-created cluster with the curated set of
-// upstream Helm repos so the catalog tab is non-empty out of the box. Operators
-// can remove any of them via the UI; only the local DB rows + helm repo entries
-// are touched (no charts are installed).
-var factoryRepos = []struct{ Name, URL string }{
+// FactoryRepo is one entry in the seeded Helm repo list. Exported so the
+// boot-time reconciler in main.go can iterate without re-defining the type.
+type FactoryRepo struct {
+	Name string
+	URL  string
+}
+
+// FactoryRepos seeds every newly-created cluster with the curated set of
+// upstream Helm repos so the catalog tab is non-empty out of the box.
+// Operators can remove any of them via the UI; only the local DB rows + helm
+// repo entries are touched (no charts are installed).
+//
+// Exported so v0.1.13+ boot-time drift reconciliation can read this list and
+// backfill repos onto clusters that were created before a particular factory
+// repo was added (v0.1.12 added longhorn + wikijs; pre-v0.1.12 clusters
+// didn't get them at create time).
+var FactoryRepos = []FactoryRepo{
 	{Name: "bitnami", URL: "https://charts.bitnami.com/bitnami"},
 	{Name: "grafana", URL: "https://grafana.github.io/helm-charts"},
 	{Name: "prometheus-community", URL: "https://prometheus-community.github.io/helm-charts"},
@@ -216,7 +228,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	// Repos tab), but each failure emits an audit row so we have a paper
 	// trail. Loop var named `seed` to avoid shadowing the *http.Request `r`.
 	appsStore := apps.NewStore(h.store)
-	for _, seed := range factoryRepos {
+	for _, seed := range FactoryRepos {
 		if _, err := appsStore.CreateRepo(r.Context(), c.ID, seed.Name, seed.URL, ptrInt64(uid)); err != nil {
 			_, _ = audit.Write(r.Context(), h.store, audit.Entry{
 				ActorID: uid,
