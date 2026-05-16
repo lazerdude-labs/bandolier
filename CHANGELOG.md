@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] — 2026-05-16
+
+Operator hit `Error: INSTALLATION FAILED: context deadline exceeded ... atomic rollback also failed` installing the homelab-essentials bundle's Longhorn chart on a fresh cluster. Root cause: helm's default 5-minute install timeout isn't enough for charts that pull multi-gigabyte images + roll out a DaemonSet on a cold-cache homelab cluster. v0.1.14 bumps the timeout. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.14` (or `:0.1` / `:latest`) to upgrade.
+
+### Fixed
+
+- **`helm install` and `helm upgrade` now wait 15 minutes by default** instead of helm's built-in 5-minute default. Longhorn's first-install routinely takes 8–12 minutes on a cold homelab cluster: ~1–2 GB of image pulls (longhorn-manager, longhorn-engine-image, longhorn-instance-manager, csi sidecars), plus a DaemonSet rollout across all nodes, plus a pre-install validation job. With the old default the install hit `context deadline exceeded` at exactly 5m, helm's `--atomic` flag tried to roll back, the rollback job ALSO failed with `BackoffLimitExceeded`, and the cluster was left with orphan Longhorn resources requiring manual cleanup. The new 15m ceiling absorbs the worst-case Longhorn run while still bounding actually-stuck installs.
+
+### Added
+
+- **`BANDOLIER_HELM_INSTALL_TIMEOUT` env var** overrides the install/upgrade timeout. Accepts Go-duration shape with second / minute / hour units: `300s`, `15m`, `1h`. Validated against `^[0-9]+(s|m|h)$`; malformed values (decimals, missing unit, shell-meta chars) silently fall through to the 15m default with an `slog.Warn` line so operators can tell their override was ignored. Defense in depth — the value is interpolated into a `helm install --timeout <X>` flag and helm uses `exec.Command` argv (not `sh -c`), so injection is technically already prevented; the allowlist is a belt-and-suspenders measure plus typo guard.
+
 ## [0.1.13] — 2026-05-16
 
 Two real bugs surfaced when operators tried to install from the catalog tab on a v0.1.12 cluster. Both fixed. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.13` (or `:0.1` / `:latest`) to upgrade.
