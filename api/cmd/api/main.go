@@ -225,6 +225,10 @@ func (a *hubEventAdapter) PublishStepEnd(id, step string, exit int) {
 	a.h.Publish(id, deployments.Event{Type: deployments.EventStepEnd, Step: step, Exit: exit})
 }
 
+func (a *hubEventAdapter) PublishStepProgress(id, step string, data any) {
+	a.h.Publish(id, deployments.Event{Type: deployments.EventStepProgress, Step: step, Data: data})
+}
+
 func (a *hubEventAdapter) PublishComplete(id, status, text string) {
 	a.h.Publish(id, deployments.Event{Type: deployments.EventDeploymentComplete, Status: status, Text: text})
 }

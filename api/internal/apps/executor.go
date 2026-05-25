@@ -31,6 +31,12 @@ type EventPublisher interface {
 	PublishLog(streamID, text string)
 	PublishStepStart(streamID, step string)
 	PublishStepEnd(streamID, step string, exit int)
+	// PublishStepProgress emits a structured progress event the UI renders
+	// as a sticky status banner (e.g. "Installing chart 2 of 4: longhorn").
+	// Used by multi-step operations like bundle installs where helm's own
+	// stdout goes silent for minutes during --wait. Data is serialized to
+	// JSON in the event payload.
+	PublishStepProgress(streamID, step string, data any)
 	PublishComplete(streamID, status, text string)
 }
 

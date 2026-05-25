@@ -10,6 +10,7 @@ type EventType string
 const (
 	EventStepStart          EventType = "step_start"
 	EventStepEnd            EventType = "step_end"
+	EventStepProgress       EventType = "step_progress"
 	EventLog                EventType = "log"
 	EventAnsible            EventType = "ansible_event"
 	EventDeploymentComplete EventType = "deployment_complete"
