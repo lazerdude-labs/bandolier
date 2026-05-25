@@ -6,6 +6,7 @@ import { LogStream } from '@/components/LogStream';
 import { DeployBanner } from '@/components/DeployBanner';
 import { getInstall } from '@/lib/api';
 import { useInstallLogs, type StepProgressData } from '@/lib/ws';
+import { formatPhase } from '@/lib/install-progress';
 
 export function InstallView() {
   const { installId } = useParams({ from: '/apps/installs/$installId' });
@@ -107,28 +108,4 @@ export function InstallView() {
       </div>
     </div>
   );
-}
-
-// formatPhase renders a StepProgressData payload as the banner text. Kept
-// here (and not in lib/ws.ts) because it's UI presentation logic, not the
-// shape of the wire event. Exported for testability.
-//
-// The exhaustiveness check on the default branch guarantees a compile-time
-// error if a future phase is added to the StepProgressData union without a
-// corresponding format string. Without it the switch silently returns
-// undefined for unknown phases — React renders that as an empty banner,
-// which is the worst kind of bug (looks fine in dev, broken in prod).
-export function formatPhase(p: StepProgressData): string {
-  switch (p.phase) {
-    case 'bundle_start':
-      return `Starting bundle ${p.bundle} — ${p.total} chart${p.total === 1 ? '' : 's'} to install…`;
-    case 'chart_install':
-      return `Installing chart ${p.index} of ${p.total}: ${p.chart} (release=${p.release}, ns=${p.namespace})`;
-    case 'rollback':
-      return `Rolling back ${p.rollback_count} previously-installed chart${p.rollback_count === 1 ? '' : 's'} after ${p.failed_chart} failed…`;
-    default: {
-      const _exhaustive: never = p;
-      return `Unknown bundle install phase: ${JSON.stringify(_exhaustive)}`;
-    }
-  }
 }

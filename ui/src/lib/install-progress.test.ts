@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatPhase } from './installs.$installId';
+import { formatPhase } from '@/lib/install-progress';
 
 // formatPhase renders the step_progress.data payload as the sticky status
 // banner string shown above the log stream during a bundle install. These
