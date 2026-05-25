@@ -3,6 +3,7 @@ package apps
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -390,6 +391,19 @@ func (h *ExecHandler) InstallBundleHandler(w http.ResponseWriter, r *http.Reques
 	}
 	if req.Bundle == "" || req.Version == "" || len(req.Choices) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bundle, version, choices required"})
+		return
+	}
+	// Bound req.Choices so an authenticated operator can't queue thousands
+	// of helm subprocesses on a single bundle POST. 50 is roughly an order
+	// of magnitude above the largest realistic curated bundle (homelab-
+	// essentials = 4) and leaves headroom for future profile bundles like
+	// red-team-ops or blue-team-soc. Hit ceiling = reject with 400; bundle
+	// authors who need more than 50 charts should compose two bundles.
+	const maxBundleChoices = 50
+	if len(req.Choices) > maxBundleChoices {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("bundle has %d choices, max %d allowed", len(req.Choices), maxBundleChoices),
+		})
 		return
 	}
 	if _, err := h.exec.Core.GetCluster(r.Context(), id); err != nil {

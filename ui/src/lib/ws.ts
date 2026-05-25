@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { fetchWSToken } from './api'
 
 export interface DeploymentEvent {
-  type: 'step_start' | 'step_end' | 'log' | 'ansible_event' | 'deployment_complete'
+  type: 'step_start' | 'step_end' | 'step_progress' | 'log' | 'ansible_event' | 'deployment_complete'
   step?: string
   stream?: string
   text?: string
@@ -11,6 +11,15 @@ export interface DeploymentEvent {
   data?: unknown
   ts: string
 }
+
+// StepProgressData is the shape of `data` on step_progress events emitted by
+// the bundle install path. The UI uses these to render a sticky status banner
+// above the log stream — helm's stdout goes silent for minutes during --wait,
+// so this is what the user actually sees changing during a multi-chart install.
+export type StepProgressData =
+  | { phase: 'bundle_start'; bundle: string; total: number }
+  | { phase: 'chart_install'; chart: string; release: string; namespace: string; index: number; total: number }
+  | { phase: 'rollback'; failed_chart: string; rollback_count: number }
 
 export type LogStreamReturn = {
   events: DeploymentEvent[]

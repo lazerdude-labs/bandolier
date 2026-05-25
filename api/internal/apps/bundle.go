@@ -150,22 +150,46 @@ func (e *Executor) runBundleInstall(
 	defer cleanup()
 
 	e.Hub.PublishStepStart(id, "bundle.install")
+	// Total non-skipped chart count for the progress banner. Skips don't
+	// count toward "N of M" because the UI shouldn't blame the user for
+	// charts they deselected — total reflects work actually attempted.
+	totalCharts := countInstallable(req.Choices)
+	e.Hub.PublishStepProgress(id, "bundle.install", map[string]any{
+		"phase":  "bundle_start",
+		"bundle": req.Bundle,
+		"total":  totalCharts,
+	})
 
 	// Track the installed-and-succeeded charts for reverse-order rollback on
 	// any subsequent failure. We snapshot the choice (with substituted
 	// hostname) so rollback can target the right release/namespace.
 	var installed []BundleChartChoice
+	chartIdx := 0 // 1-based "N of M" index over non-skipped charts
 
 	for i, choice := range req.Choices {
 		if choice.Skip {
 			_, _ = fmt.Fprintf(tee, "bundle: skip %s (release=%s)\n", choice.Chart, choice.Release)
 			continue
 		}
+		chartIdx++
 
 		// Hostname template substitution — apply before any helm work so
 		// the values file path (if hostname is rendered into custom values
 		// downstream) and audit details show the resolved value.
 		choice.Hostname = substituteHostnameTemplate(choice.Hostname, choice.Release, fqdn)
+
+		// Progress banner update — emitted BEFORE helm.Install because helm's
+		// own stdout goes silent during --wait (image pulls, DaemonSet
+		// rollout). Without this the UI shows nothing changing for 5-15 min
+		// on heavy charts like longhorn. See issue #42.
+		e.Hub.PublishStepProgress(id, "bundle.install", map[string]any{
+			"phase":     "chart_install",
+			"chart":     choice.Chart,
+			"release":   choice.Release,
+			"namespace": choice.Namespace,
+			"index":     chartIdx,
+			"total":     totalCharts,
+		})
 
 		_, _ = fmt.Fprintf(tee, "bundle: install %s (release=%s, ns=%s)\n",
 			choice.Chart, choice.Release, choice.Namespace)
@@ -216,6 +240,13 @@ func (e *Executor) runBundleInstall(
 		if opErr != nil {
 			_, _ = fmt.Fprintf(tee, "bundle: chart %s failed: %s\n", choice.Chart, opErr.Error())
 			outcomes[i].Outcome = "failed"
+			if len(installed) > 0 {
+				e.Hub.PublishStepProgress(id, "bundle.install", map[string]any{
+					"phase":         "rollback",
+					"failed_chart":  choice.Chart,
+					"rollback_count": len(installed),
+				})
+			}
 			rollbackInstalled(ctx, helm, installed, tee)
 			markRolledBack(outcomes, installed)
 			finish(false, opErr.Error())
@@ -227,6 +258,20 @@ func (e *Executor) runBundleInstall(
 	}
 
 	finish(true, "")
+}
+
+// countInstallable returns the number of non-skipped chart choices in a
+// bundle request. Drives the "N of M" denominator in step_progress events
+// emitted by runBundleInstall. Extracted from the install loop so the
+// skip-aware counting can be tested without a full Executor stub.
+func countInstallable(choices []BundleChartChoice) int {
+	n := 0
+	for _, c := range choices {
+		if !c.Skip {
+			n++
+		}
+	}
+	return n
 }
 
 // substituteHostnameTemplate swaps "{release}" and "{fqdn}" placeholders in
