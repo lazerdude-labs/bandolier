@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **New event type `step_progress`** added to the WebSocket log stream protocol. The frontend `DeploymentEvent` union and the backend `apps.EventPublisher` interface both gained a `PublishStepProgress(streamID, step string, data any)` method; the `step_progress` event carries a structured `data` payload (phase, chart, index, total, etc.) rather than free-text. Existing event types (`step_start`, `step_end`, `log`, `ansible_event`, `deployment_complete`) are unchanged. The bundle install flow is the first emitter; single-chart installs and cluster deploys do not emit `step_progress`.
 
+### Security
+
+- **`POST /api/clusters/{id}/apps/bundle` now caps `choices` at 50 entries.** Requests with more get a 400 with `bundle has N choices, max 50 allowed`. Prevents an authenticated operator from queuing thousands of helm subprocesses on a single bundle POST (each non-skipped choice holds the per-cluster mutex and spawns a helm install). The curated bundles in catalog ship with 1–4 charts today and even profile bundles (red-team-ops, blue-team-soc) are not expected to exceed ~20 entries, so 50 leaves comfortable headroom. Bundle authors needing more than 50 charts should compose two bundles.
+
 ## [0.1.14] — 2026-05-16
 
 Operator hit `Error: INSTALLATION FAILED: context deadline exceeded ... atomic rollback also failed` installing the homelab-essentials bundle's Longhorn chart on a fresh cluster. Root cause: helm's default 5-minute install timeout isn't enough for charts that pull multi-gigabyte images + roll out a DaemonSet on a cold-cache homelab cluster. v0.1.14 bumps the timeout. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.14` (or `:0.1` / `:latest`) to upgrade.

@@ -1,6 +1,6 @@
 import { useParams } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link as LinkIcon, Check } from 'lucide-react';
 import { LogStream } from '@/components/LogStream';
 import { DeployBanner } from '@/components/DeployBanner';
@@ -43,12 +43,21 @@ export function InstallView() {
 
   const phaseText = phase ? formatPhase(phase) : null;
   const [copied, setCopied] = useState(false);
+  // Capture the timer handle so a quick unmount (operator navigating away
+  // within the 1.5s confirmation window) doesn't leave a callback queued
+  // against an unmounted component. Cancelling a prior timer on repeat
+  // clicks also prevents the icon from getting stuck mid-flip.
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyLink = () => {
     void navigator.clipboard?.writeText(window.location.href).then(() => {
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
     });
   };
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
 
   return (
     <div className="grid grid-cols-[1fr_320px] gap-6 h-[calc(100vh-120px)]">
@@ -103,6 +112,12 @@ export function InstallView() {
 // formatPhase renders a StepProgressData payload as the banner text. Kept
 // here (and not in lib/ws.ts) because it's UI presentation logic, not the
 // shape of the wire event. Exported for testability.
+//
+// The exhaustiveness check on the default branch guarantees a compile-time
+// error if a future phase is added to the StepProgressData union without a
+// corresponding format string. Without it the switch silently returns
+// undefined for unknown phases — React renders that as an empty banner,
+// which is the worst kind of bug (looks fine in dev, broken in prod).
 export function formatPhase(p: StepProgressData): string {
   switch (p.phase) {
     case 'bundle_start':
@@ -111,5 +126,9 @@ export function formatPhase(p: StepProgressData): string {
       return `Installing chart ${p.index} of ${p.total}: ${p.chart} (release=${p.release}, ns=${p.namespace})`;
     case 'rollback':
       return `Rolling back ${p.rollback_count} previously-installed chart${p.rollback_count === 1 ? '' : 's'} after ${p.failed_chart} failed…`;
+    default: {
+      const _exhaustive: never = p;
+      return `Unknown bundle install phase: ${JSON.stringify(_exhaustive)}`;
+    }
   }
 }
