@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] — 2026-05-25
+
+Operator reported that the homelab-essentials bundle install gave one log line and then went silent — no idea whether it was still running, which chart it was on, or whether it had failed. Root cause: helm `--wait` emits no stdout during the long pull+rollout phase, and bundle installs had no structured progress signal of their own. v0.1.15 adds a sticky progress banner ("Installing chart 2 of 4: longhorn/longhorn …") that updates as each chart begins, plus a copy-permalink button so operators can bookmark long-running installs. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.15` (or `:0.1` / `:latest`) to upgrade.
+
 ### Added
 
 - **Bundle install progress banner.** Multi-chart bundle installs (e.g. `homelab-essentials`) now emit structured `step_progress` events as each chart begins. The install detail page (`/apps/installs/<id>`) renders these as a sticky status banner above the log stream — e.g. *"Installing chart 2 of 4: longhorn/longhorn (release=longhorn, ns=longhorn-system)"*. Previously the UI showed a single `bundle: install <chart>` log line and then went silent for 5–15 minutes while helm waited on image pulls + DaemonSet rollout (`--wait` produces no helm stdout during that interval), leaving the operator unable to tell which chart was running or whether the install was still alive. Rollback now also surfaces a progress event when a mid-bundle failure triggers reverse-order uninstall of previously-installed charts. Single-chart installs are unchanged — they never emit `step_progress` and the banner stays hidden. Closes #42.
