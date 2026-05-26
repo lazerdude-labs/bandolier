@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] — 2026-05-26
+
+Two operator-reported gaps from the v0.1.15 deployment cycle: the Installed tab showed "No applications installed" no matter what was actually on the cluster (parse-error 500 on every `/apps/releases` call against any helm v3.16+ install), and operators who clicked away from an install detail page had no UI path back to the logs even though everything was still on disk. v0.1.16 fixes the parse error and ships an Install History sub-tab. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.16` (or `:0.1` / `:latest`) to upgrade.
+
+### Added
+
+- **Install history sub-tab under Apps.** Operators can now browse every past install attempt for a cluster — succeeded, failed, in-progress — from `Apps → History`. Each row shows started timestamp (relative + absolute on hover), operation type, chart (with a `BUNDLE` badge for bundle-parent rows like `bundle/homelab-essentials`), release name, status badge, and duration. Click any row to open the existing `/apps/installs/<id>` detail page with full logs and the v0.1.15 progress banner. Backed by the existing `GET /api/clusters/{id}/apps/installs` endpoint (no new endpoint needed). The view auto-refreshes every 5 seconds while any row is in `running` status so transitions promote without manual reload. Closes #46. Until now, the only path to a past install's logs was the permalink URL captured at install time — if the operator clicked away before noting it, the log file on disk + the `apps_installs` row were both unreachable from the UI.
+
+### Fixed
+
+- **`GET /api/clusters/{id}/apps/releases` no longer 500s on clusters with releases.** Helm CLI 3.16+ emits the `revision` field in `helm list -A -o json` as a quoted string (`"1"`) instead of a bare integer (`1`). The Go `rawList.Revision int` field in `api/internal/apps/helm.go` rejected the string shape, returning `parse helm list: json: cannot unmarshal string into Go struct field rawList.revision of type int` on every cluster that had at least one release. The Installed tab silently showed "No applications installed." regardless of actual cluster state. `rawList.Revision` is now `json.Number`, which transparently accepts both shapes; `parseListJSON` converts to `int` for the public `Release.Revision` field (UI consumers stay unchanged). Malformed revision values (e.g. a hypothetical `"latest"`) now surface a parse error with the release identity rather than silently zeroing. Closes #45.
+
 ## [0.1.15] — 2026-05-25
 
 Operator reported that the homelab-essentials bundle install gave one log line and then went silent — no idea whether it was still running, which chart it was on, or whether it had failed. Root cause: helm `--wait` emits no stdout during the long pull+rollout phase, and bundle installs had no structured progress signal of their own. v0.1.15 adds a sticky progress banner ("Installing chart 2 of 4: longhorn/longhorn …") that updates as each chart begins, plus a copy-permalink button so operators can bookmark long-running installs. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.15` (or `:0.1` / `:latest`) to upgrade.
