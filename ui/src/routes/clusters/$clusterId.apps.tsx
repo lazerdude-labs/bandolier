@@ -5,8 +5,9 @@ import { getCluster } from '@/lib/api';
 import { InstalledTab } from '@/components/apps/InstalledTab';
 import { CatalogTab } from '@/components/apps/CatalogTab';
 import { ReposTab } from '@/components/apps/ReposTab';
+import { HistoryTab } from '@/components/apps/HistoryTab';
 
-type Tab = 'installed' | 'catalog' | 'repos';
+type Tab = 'installed' | 'catalog' | 'history' | 'repos';
 
 export function ClusterApps() {
   const { clusterId } = useParams({ from: '/clusters/$clusterId/apps' });
@@ -25,7 +26,7 @@ export function ClusterApps() {
       <h1 className="h1">Bandolier applications</h1>
 
       <div className="flex gap-2 border-b border-[hsl(var(--border))]">
-        {(['installed', 'catalog', 'repos'] as const).map((t) => (
+        {(['installed', 'catalog', 'history', 'repos'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -40,6 +41,7 @@ export function ClusterApps() {
 
       {tab === 'installed' && <InstalledTab clusterId={clusterId} clusterFqdn={cluster.data?.network?.fqdn ?? ''} />}
       {tab === 'catalog' && <CatalogTab clusterId={clusterId} clusterFqdn={cluster.data?.network?.fqdn ?? ''} />}
+      {tab === 'history' && <HistoryTab clusterId={clusterId} />}
       {tab === 'repos' && <ReposTab clusterId={clusterId} />}
     </div>
   );
