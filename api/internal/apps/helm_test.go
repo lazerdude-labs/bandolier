@@ -14,6 +14,65 @@ func TestParseListJSON(t *testing.T) {
 	if len(out) != 1 || out[0].Name != "traefik" || out[0].Namespace != "kube-system" {
 		t.Fatalf("got %+v", out)
 	}
+	if out[0].Revision != 1 {
+		t.Fatalf("revision: got %d want 1", out[0].Revision)
+	}
+}
+
+// TestParseListJSONRevisionAsString pins the v0.1.16 fix for issue #45.
+// helm CLI 3.16+ emits `revision` as a quoted JSON string ("1") instead of a
+// bare integer (1). The old `Revision int` field rejected the string and
+// failed every /apps/releases call on a cluster with any helm release,
+// silently breaking the Installed tab. json.Number accepts both shapes.
+func TestParseListJSONRevisionAsString(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{"int revision (old helm)", `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":2,"status":"deployed","updated":"t"}]`, 2},
+		{"string revision (helm 3.16+)", `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":"3","status":"deployed","updated":"t"}]`, 3},
+		{"multi-digit string revision", `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":"42","status":"deployed","updated":"t"}]`, 42},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := parseListJSON([]byte(c.in))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(out) != 1 {
+				t.Fatalf("len: got %d want 1", len(out))
+			}
+			if out[0].Revision != c.want {
+				t.Errorf("revision: got %d want %d", out[0].Revision, c.want)
+			}
+		})
+	}
+}
+
+// TestParseListJSONRevisionMalformed verifies that a non-numeric revision
+// causes the offending release to be skipped (with a slog.Warn line)
+// rather than failing the entire helm list call. The whole point of #45
+// is that one bad revision shouldn't blank the entire Installed tab —
+// reintroducing fail-all on a single weird release would be a regression.
+// Incomplete data is better than no data for a homelab tool.
+func TestParseListJSONRevisionMalformed(t *testing.T) {
+	in := `[
+		{"name":"good","namespace":"n","chart":"c-1","app_version":"v1","revision":1,"status":"deployed","updated":"t"},
+		{"name":"bad","namespace":"n","chart":"c-1","app_version":"v1","revision":"latest","status":"deployed","updated":"t"},
+		{"name":"alsogood","namespace":"n","chart":"c-2","app_version":"v1","revision":"3","status":"deployed","updated":"t"}
+	]`
+	out, err := parseListJSON([]byte(in))
+	if err != nil {
+		t.Fatalf("malformed revision should not fail the whole call: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 releases (bad one skipped), got %d: %+v", len(out), out)
+	}
+	names := []string{out[0].Name, out[1].Name}
+	if names[0] != "good" || names[1] != "alsogood" {
+		t.Errorf("unexpected releases retained: %v", names)
+	}
 }
 
 func TestParseSearchJSON(t *testing.T) {

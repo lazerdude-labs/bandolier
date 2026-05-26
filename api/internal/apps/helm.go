@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -108,14 +110,22 @@ func (h HelmCLI) KubeconfigFile() string { return h.KubeconfigPath }
 
 // ---------- internals ----------
 
+// rawList mirrors the JSON shape `helm list -A -o json` emits. Revision is a
+// raw JSON token because helm 3.16+ emits it as a quoted string ("1") instead
+// of a bare number (1) on some clusters — the older `Revision int` field
+// rejected the string shape and 500'd /apps/releases on every such cluster,
+// blocking the Installed tab. json.RawMessage stores whatever the JSON layer
+// produces (bare number or quoted string or anything else) so we can decide
+// how to handle each shape in parseListJSON without the encoder failing
+// upfront. See issue #45.
 type rawList struct {
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace"`
-	Chart      string `json:"chart"`
-	AppVersion string `json:"app_version"`
-	Revision   int    `json:"revision"`
-	Status     string `json:"status"`
-	Updated    string `json:"updated"`
+	Name       string          `json:"name"`
+	Namespace  string          `json:"namespace"`
+	Chart      string          `json:"chart"`
+	AppVersion string          `json:"app_version"`
+	Revision   json.RawMessage `json:"revision"`
+	Status     string          `json:"status"`
+	Updated    string          `json:"updated"`
 }
 
 func parseListJSON(b []byte) ([]Release, error) {
@@ -128,7 +138,32 @@ func parseListJSON(b []byte) ([]Release, error) {
 	}
 	out := make([]Release, 0, len(raw))
 	for _, r := range raw {
-		out = append(out, Release(r))
+		// Strip surrounding double-quotes if the raw JSON token is a
+		// quoted string (helm 3.16+ shape), otherwise use the raw bytes
+		// (older helm's bare-number shape). strconv.Atoi then parses
+		// either form. Malformed revision = log + skip THIS release,
+		// never fail the whole helm list call — reintroducing fail-all
+		// on a single weird release would be the exact regression #45
+		// set out to fix, just with a different trigger. The skipped
+		// release stays invisible to the UI; one missing row beats
+		// a blank tab.
+		revStr := strings.Trim(string(r.Revision), `"`)
+		rev, err := strconv.Atoi(revStr)
+		if err != nil {
+			slog.Warn("helm list: skipping release with unparseable revision",
+				"namespace", r.Namespace, "release", r.Name,
+				"revision", revStr, "err", err.Error())
+			continue
+		}
+		out = append(out, Release{
+			Name:       r.Name,
+			Namespace:  r.Namespace,
+			Chart:      r.Chart,
+			AppVersion: r.AppVersion,
+			Revision:   rev,
+			Status:     r.Status,
+			Updated:    r.Updated,
+		})
 	}
 	return out, nil
 }
