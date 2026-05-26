@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -108,14 +109,19 @@ func (h HelmCLI) KubeconfigFile() string { return h.KubeconfigPath }
 
 // ---------- internals ----------
 
+// rawList mirrors the JSON shape `helm list -A -o json` emits. Revision uses
+// json.Number rather than int because helm 3.16+ emits revision as a quoted
+// string ("1") instead of a bare number (1) — the unmarshal into an int field
+// fails on every cluster that has at least one release, blocking the Installed
+// tab. json.Number transparently accepts both shapes. See issue #45.
 type rawList struct {
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace"`
-	Chart      string `json:"chart"`
-	AppVersion string `json:"app_version"`
-	Revision   int    `json:"revision"`
-	Status     string `json:"status"`
-	Updated    string `json:"updated"`
+	Name       string      `json:"name"`
+	Namespace  string      `json:"namespace"`
+	Chart      string      `json:"chart"`
+	AppVersion string      `json:"app_version"`
+	Revision   json.Number `json:"revision"`
+	Status     string      `json:"status"`
+	Updated    string      `json:"updated"`
 }
 
 func parseListJSON(b []byte) ([]Release, error) {
@@ -128,7 +134,26 @@ func parseListJSON(b []byte) ([]Release, error) {
 	}
 	out := make([]Release, 0, len(raw))
 	for _, r := range raw {
-		out = append(out, Release(r))
+		// Parse revision separately so the public Release type stays int
+		// (UI consumers prefer numeric comparison over string parsing).
+		// Strconv.Atoi handles json.Number's underlying string for both
+		// bare-int ("1") and quoted-int (also "1" by the time we get here)
+		// shapes. Malformed revision = log + skip the release rather than
+		// fail the whole helm list call.
+		rev, err := strconv.Atoi(string(r.Revision))
+		if err != nil {
+			return nil, fmt.Errorf("parse helm list revision %q for release %s/%s: %w",
+				r.Revision, r.Namespace, r.Name, err)
+		}
+		out = append(out, Release{
+			Name:       r.Name,
+			Namespace:  r.Namespace,
+			Chart:      r.Chart,
+			AppVersion: r.AppVersion,
+			Revision:   rev,
+			Status:     r.Status,
+			Updated:    r.Updated,
+		})
 	}
 	return out, nil
 }

@@ -14,6 +14,52 @@ func TestParseListJSON(t *testing.T) {
 	if len(out) != 1 || out[0].Name != "traefik" || out[0].Namespace != "kube-system" {
 		t.Fatalf("got %+v", out)
 	}
+	if out[0].Revision != 1 {
+		t.Fatalf("revision: got %d want 1", out[0].Revision)
+	}
+}
+
+// TestParseListJSONRevisionAsString pins the v0.1.16 fix for issue #45.
+// helm CLI 3.16+ emits `revision` as a quoted JSON string ("1") instead of a
+// bare integer (1). The old `Revision int` field rejected the string and
+// failed every /apps/releases call on a cluster with any helm release,
+// silently breaking the Installed tab. json.Number accepts both shapes.
+func TestParseListJSONRevisionAsString(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{"int revision (old helm)", `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":2,"status":"deployed","updated":"t"}]`, 2},
+		{"string revision (helm 3.16+)", `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":"3","status":"deployed","updated":"t"}]`, 3},
+		{"multi-digit string revision", `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":"42","status":"deployed","updated":"t"}]`, 42},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := parseListJSON([]byte(c.in))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(out) != 1 {
+				t.Fatalf("len: got %d want 1", len(out))
+			}
+			if out[0].Revision != c.want {
+				t.Errorf("revision: got %d want %d", out[0].Revision, c.want)
+			}
+		})
+	}
+}
+
+// TestParseListJSONRevisionMalformed verifies that a non-numeric revision
+// surfaces as a parse error rather than silently zeroing. Pins behavior so
+// future "revision: latest" or similar helm output changes get a loud
+// signal rather than a confused UI showing revision 0.
+func TestParseListJSONRevisionMalformed(t *testing.T) {
+	in := `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":"latest","status":"deployed","updated":"t"}]`
+	_, err := parseListJSON([]byte(in))
+	if err == nil {
+		t.Fatal("expected parse error on non-numeric revision, got nil")
+	}
 }
 
 func TestParseSearchJSON(t *testing.T) {
