@@ -51,14 +51,27 @@ func TestParseListJSONRevisionAsString(t *testing.T) {
 }
 
 // TestParseListJSONRevisionMalformed verifies that a non-numeric revision
-// surfaces as a parse error rather than silently zeroing. Pins behavior so
-// future "revision: latest" or similar helm output changes get a loud
-// signal rather than a confused UI showing revision 0.
+// causes the offending release to be skipped (with a slog.Warn line)
+// rather than failing the entire helm list call. The whole point of #45
+// is that one bad revision shouldn't blank the entire Installed tab —
+// reintroducing fail-all on a single weird release would be a regression.
+// Incomplete data is better than no data for a homelab tool.
 func TestParseListJSONRevisionMalformed(t *testing.T) {
-	in := `[{"name":"r","namespace":"n","chart":"c-1","app_version":"v1","revision":"latest","status":"deployed","updated":"t"}]`
-	_, err := parseListJSON([]byte(in))
-	if err == nil {
-		t.Fatal("expected parse error on non-numeric revision, got nil")
+	in := `[
+		{"name":"good","namespace":"n","chart":"c-1","app_version":"v1","revision":1,"status":"deployed","updated":"t"},
+		{"name":"bad","namespace":"n","chart":"c-1","app_version":"v1","revision":"latest","status":"deployed","updated":"t"},
+		{"name":"alsogood","namespace":"n","chart":"c-2","app_version":"v1","revision":"3","status":"deployed","updated":"t"}
+	]`
+	out, err := parseListJSON([]byte(in))
+	if err != nil {
+		t.Fatalf("malformed revision should not fail the whole call: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 releases (bad one skipped), got %d: %+v", len(out), out)
+	}
+	names := []string{out[0].Name, out[1].Name}
+	if names[0] != "good" || names[1] != "alsogood" {
+		t.Errorf("unexpected releases retained: %v", names)
 	}
 }
 

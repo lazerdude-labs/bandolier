@@ -88,11 +88,25 @@ export function HistoryTab({ clusterId }: { clusterId: string }) {
         </tr>
       </thead>
       <tbody>
-        {installs.map((i) => (
+        {installs.map((i) => {
+          const open = () => nav({ to: '/apps/installs/$installId', params: { installId: i.id } });
+          return (
           <tr
             key={i.id}
-            className="cursor-pointer hover:bg-[hsl(var(--muted)/0.4)]"
-            onClick={() => nav({ to: '/apps/installs/$installId', params: { installId: i.id } })}
+            className="cursor-pointer hover:bg-[hsl(var(--muted)/0.4)] focus:bg-[hsl(var(--muted)/0.4)] focus:outline-2 focus:outline-[hsl(var(--ring))]"
+            tabIndex={0}
+            role="link"
+            aria-label={`Open install ${i.release_name} from ${new Date(i.started_at).toLocaleString()}`}
+            onClick={open}
+            onKeyDown={(e) => {
+              // Enter / Space activate the row, matching the "row is a link"
+              // accessibility pattern. Space requires preventDefault to stop
+              // page scroll. Tab order naturally moves to the next row.
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                open();
+              }
+            }}
           >
             <td title={new Date(i.started_at).toLocaleString()}>{relativeTime(i.started_at)}</td>
             <td className="font-mono text-[11px] uppercase">{i.operation}</td>
@@ -115,7 +129,8 @@ export function HistoryTab({ clusterId }: { clusterId: string }) {
               <ExternalLink size={12} className="text-muted-foreground" aria-hidden />
             </td>
           </tr>
-        ))}
+          );
+        })}
         {installs.length === 0 ? (
           <tr><td colSpan={7} className="text-center text-muted-foreground py-8">No install history yet on this cluster.</td></tr>
         ) : null}

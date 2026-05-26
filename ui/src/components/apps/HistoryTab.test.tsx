@@ -79,10 +79,10 @@ describe('HistoryTab', () => {
     listInstallsStub.mockResolvedValueOnce([older, newer]);
     render(withQuery(<HistoryTab clusterId="c1" />));
     await waitFor(() => expect(screen.getByText('newer-release')).toBeInTheDocument());
-    const rows = screen.getAllByRole('row');
-    // rows[0] is the thead row; rows[1] should be newest first.
-    expect(rows[1].textContent).toContain('newer-release');
-    expect(rows[2].textContent).toContain('older-release');
+    // Data rows are role="link" (not "row") for keyboard nav; query that role.
+    const dataRows = screen.getAllByRole('link');
+    expect(dataRows[0].textContent).toContain('newer-release');
+    expect(dataRows[1].textContent).toContain('older-release');
   });
 
   it('clicking a row navigates to the install detail page', async () => {
@@ -95,6 +95,23 @@ describe('HistoryTab', () => {
       to: '/apps/installs/$installId',
       params: { installId: 'aaaaaaaaaaaa' },
     });
+  });
+
+  it('row is keyboard accessible: tabIndex=0, role=link, Enter/Space activate', async () => {
+    listInstallsStub.mockResolvedValueOnce([baseInstall]);
+    render(withQuery(<HistoryTab clusterId="c1" />));
+    await waitFor(() => expect(screen.getByText('bitnami/grafana')).toBeInTheDocument());
+    const row = screen.getByText('bitnami/grafana').closest('tr')!;
+    expect(row).toHaveAttribute('tabindex', '0');
+    expect(row).toHaveAttribute('role', 'link');
+    fireEvent.keyDown(row, { key: 'Enter' });
+    expect(navigateStub).toHaveBeenCalledWith({
+      to: '/apps/installs/$installId',
+      params: { installId: 'aaaaaaaaaaaa' },
+    });
+    navigateStub.mockReset();
+    fireEvent.keyDown(row, { key: ' ' });
+    expect(navigateStub).toHaveBeenCalledTimes(1);
   });
 
   it('shows in-progress duration label while running', async () => {

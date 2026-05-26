@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -109,19 +110,22 @@ func (h HelmCLI) KubeconfigFile() string { return h.KubeconfigPath }
 
 // ---------- internals ----------
 
-// rawList mirrors the JSON shape `helm list -A -o json` emits. Revision uses
-// json.Number rather than int because helm 3.16+ emits revision as a quoted
-// string ("1") instead of a bare number (1) — the unmarshal into an int field
-// fails on every cluster that has at least one release, blocking the Installed
-// tab. json.Number transparently accepts both shapes. See issue #45.
+// rawList mirrors the JSON shape `helm list -A -o json` emits. Revision is a
+// raw JSON token because helm 3.16+ emits it as a quoted string ("1") instead
+// of a bare number (1) on some clusters — the older `Revision int` field
+// rejected the string shape and 500'd /apps/releases on every such cluster,
+// blocking the Installed tab. json.RawMessage stores whatever the JSON layer
+// produces (bare number or quoted string or anything else) so we can decide
+// how to handle each shape in parseListJSON without the encoder failing
+// upfront. See issue #45.
 type rawList struct {
-	Name       string      `json:"name"`
-	Namespace  string      `json:"namespace"`
-	Chart      string      `json:"chart"`
-	AppVersion string      `json:"app_version"`
-	Revision   json.Number `json:"revision"`
-	Status     string      `json:"status"`
-	Updated    string      `json:"updated"`
+	Name       string          `json:"name"`
+	Namespace  string          `json:"namespace"`
+	Chart      string          `json:"chart"`
+	AppVersion string          `json:"app_version"`
+	Revision   json.RawMessage `json:"revision"`
+	Status     string          `json:"status"`
+	Updated    string          `json:"updated"`
 }
 
 func parseListJSON(b []byte) ([]Release, error) {
@@ -134,16 +138,22 @@ func parseListJSON(b []byte) ([]Release, error) {
 	}
 	out := make([]Release, 0, len(raw))
 	for _, r := range raw {
-		// Parse revision separately so the public Release type stays int
-		// (UI consumers prefer numeric comparison over string parsing).
-		// Strconv.Atoi handles json.Number's underlying string for both
-		// bare-int ("1") and quoted-int (also "1" by the time we get here)
-		// shapes. Malformed revision = log + skip the release rather than
-		// fail the whole helm list call.
-		rev, err := strconv.Atoi(string(r.Revision))
+		// Strip surrounding double-quotes if the raw JSON token is a
+		// quoted string (helm 3.16+ shape), otherwise use the raw bytes
+		// (older helm's bare-number shape). strconv.Atoi then parses
+		// either form. Malformed revision = log + skip THIS release,
+		// never fail the whole helm list call — reintroducing fail-all
+		// on a single weird release would be the exact regression #45
+		// set out to fix, just with a different trigger. The skipped
+		// release stays invisible to the UI; one missing row beats
+		// a blank tab.
+		revStr := strings.Trim(string(r.Revision), `"`)
+		rev, err := strconv.Atoi(revStr)
 		if err != nil {
-			return nil, fmt.Errorf("parse helm list revision %q for release %s/%s: %w",
-				r.Revision, r.Namespace, r.Name, err)
+			slog.Warn("helm list: skipping release with unparseable revision",
+				"namespace", r.Namespace, "release", r.Name,
+				"revision", revStr, "err", err.Error())
+			continue
 		}
 		out = append(out, Release{
 			Name:       r.Name,
