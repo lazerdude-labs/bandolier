@@ -240,6 +240,9 @@ func buildInstallArgs(req InstallRequest, valuesPath string) []string {
 			"--set", "ingress.enabled=true",
 			"--set", "ingress.className=traefik")
 	}
+	if req.StorageClass != "" {
+		a = append(a, "--set", "global.storageClass="+req.StorageClass)
+	}
 	if valuesPath != "" {
 		a = append(a, "-f", valuesPath)
 	}

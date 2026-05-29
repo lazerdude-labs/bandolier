@@ -71,18 +71,20 @@ func (c *releaseCache) invalidate(key string) {
 // (Phase 3C) which uses ReleasesCache().invalidate to drop stale cache rows
 // after a successful operation.
 type Handler struct {
-	store    *Store
-	catalog  *Catalog
-	hf       HelmFactory
-	releases *releaseCache
+	store          *Store
+	catalog        *Catalog
+	hf             HelmFactory
+	releases       *releaseCache
+	storageClasses *storageClassCache
 }
 
 func NewHandler(s *Store, catalog *Catalog, hf HelmFactory) *Handler {
 	return &Handler{
-		store:    s,
-		catalog:  catalog,
-		hf:       hf,
-		releases: newReleaseCache(releasesCacheTTL),
+		store:          s,
+		catalog:        catalog,
+		hf:             hf,
+		releases:       newReleaseCache(releasesCacheTTL),
+		storageClasses: newStorageClassCache(releasesCacheTTL),
 	}
 }
 
@@ -276,8 +278,13 @@ func (h *ExecHandler) Install(w http.ResponseWriter, r *http.Request) {
 	req.Version = strings.TrimSpace(req.Version)
 	req.ReleaseName = strings.TrimSpace(req.ReleaseName)
 	req.Namespace = strings.TrimSpace(req.Namespace)
+	req.StorageClass = strings.TrimSpace(req.StorageClass)
 	if req.Chart == "" || req.Version == "" || req.ReleaseName == "" || req.Namespace == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "chart, version, release_name, namespace required"})
+		return
+	}
+	if req.StorageClass != "" && !validStorageClassName(req.StorageClass) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid storage_class"})
 		return
 	}
 
@@ -314,8 +321,13 @@ func (h *ExecHandler) Upgrade(w http.ResponseWriter, r *http.Request) {
 	req.Chart = strings.TrimSpace(req.Chart)
 	req.Version = strings.TrimSpace(req.Version)
 	req.Namespace = strings.TrimSpace(req.Namespace)
+	req.StorageClass = strings.TrimSpace(req.StorageClass)
 	if req.Chart == "" || req.Version == "" || req.Namespace == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "chart, version, namespace required"})
+		return
+	}
+	if req.StorageClass != "" && !validStorageClassName(req.StorageClass) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid storage_class"})
 		return
 	}
 
@@ -405,6 +417,15 @@ func (h *ExecHandler) InstallBundleHandler(w http.ResponseWriter, r *http.Reques
 			"error": fmt.Sprintf("bundle has %d choices, max %d allowed", len(req.Choices), maxBundleChoices),
 		})
 		return
+	}
+	// Validate operator-supplied StorageClass names before they reach the
+	// `helm --set global.storageClass=<v>` arg. Rejects values that could
+	// inject extra --set keys via helm's comma-splitting. Empty/nil = unset.
+	for _, c := range req.Choices {
+		if c.StorageClass != nil && *c.StorageClass != "" && !validStorageClassName(*c.StorageClass) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid storage_class in choices"})
+			return
+		}
 	}
 	if _, err := h.exec.Core.GetCluster(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})

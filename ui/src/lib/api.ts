@@ -261,6 +261,7 @@ export type InstallRequest = {
   values?: string;
   atomic: boolean;
   ingress_value_path?: string;
+  storage_class?: string;
 };
 
 export type BundleChart = {
@@ -270,6 +271,7 @@ export type BundleChart = {
   namespace: string;
   hostname?: string;
   required: boolean;
+  storage?: boolean;
 };
 
 export type BundleChartChoice = {
@@ -280,6 +282,13 @@ export type BundleChartChoice = {
   hostname?: string;
   values?: string;
   skip: boolean;
+  storage_class?: string;
+};
+
+export type StorageClass = {
+  name: string;
+  provisioner: string;
+  is_default: boolean;
 };
 
 export type BundleInstallRequest = {
@@ -415,6 +424,9 @@ export const getInstall = (id: string) =>
 
 export const installBundle = (clusterID: string, req: BundleInstallRequest) =>
   api<{ install_id: string }>('POST', `/api/clusters/${clusterID}/apps/bundle`, req);
+
+export const listStorageClasses = (clusterID: string) =>
+  api<{ storage_classes: StorageClass[] }>('GET', `/api/clusters/${clusterID}/apps/storage-classes`);
 
 export const testDNS = (clusterID: string) =>
   api<DNSTestResult>('POST', `/api/clusters/${clusterID}/dns/test`);

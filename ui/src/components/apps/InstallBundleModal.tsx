@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { installBundle, type CatalogEntry, type BundleChartChoice , errMessage } from '@/lib/api';
+import { installBundle, listStorageClasses, type CatalogEntry, type BundleChartChoice , errMessage } from '@/lib/api';
 import { useToasts } from '@/store/toasts';
 
 function substituteHostname(template: string, release: string, fqdn: string): string {
@@ -35,6 +35,12 @@ export function InstallBundleModal({
     setChoices((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
   };
 
+  const scQ = useQuery({
+    queryKey: ['storage-classes', clusterId],
+    queryFn: () => listStorageClasses(clusterId),
+  });
+  const storageClasses = scQ.data?.storage_classes ?? [];
+
   const mut = useMutation({
     mutationFn: () => installBundle(clusterId, {
       bundle: entry.name,
@@ -67,6 +73,7 @@ export function InstallBundleModal({
                 <th>Chart</th>
                 <th>Release</th>
                 <th>Hostname</th>
+                <th>Storage class</th>
               </tr>
             </thead>
             <tbody>
@@ -85,6 +92,25 @@ export function InstallBundleModal({
                   <td className="font-mono text-xs">{c.release}.{c.namespace}</td>
                   <td className="font-mono text-xs text-muted-foreground">
                     {choices[i].hostname || '—'}
+                  </td>
+                  <td>
+                    {c.storage ? (
+                      <select
+                        className="input text-xs"
+                        aria-label={`storage class for ${c.release}`}
+                        value={choices[i].storage_class ?? ''}
+                        onChange={(e) => updateChoice(i, { storage_class: e.target.value || undefined })}
+                      >
+                        <option value="">(cluster default)</option>
+                        {storageClasses.map((sc) => (
+                          <option key={sc.name} value={sc.name}>
+                            {sc.name}{sc.is_default ? ' (default)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

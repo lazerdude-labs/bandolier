@@ -112,6 +112,30 @@ func TestBuildInstallArgs(t *testing.T) {
 	}
 }
 
+func TestBuildInstallArgsStorageClass(t *testing.T) {
+	t.Run("sets global.storageClass when present", func(t *testing.T) {
+		args := buildInstallArgs(InstallRequest{
+			Chart: "longhorn/longhorn", Version: "1.0.0", ReleaseName: "lh",
+			Namespace: "ns", StorageClass: "longhorn",
+		}, "")
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "--set global.storageClass=longhorn") {
+			t.Errorf("expected --set global.storageClass=longhorn in args, got: %s", joined)
+		}
+	})
+
+	t.Run("omits storageClass flag when empty", func(t *testing.T) {
+		args := buildInstallArgs(InstallRequest{
+			Chart: "longhorn/longhorn", Version: "1.0.0", ReleaseName: "lh",
+			Namespace: "ns",
+		}, "")
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "global.storageClass") {
+			t.Errorf("did not expect storageClass flag, got: %s", joined)
+		}
+	})
+}
+
 func TestBuildUpgradeArgs(t *testing.T) {
 	args := buildUpgradeArgs(InstallRequest{
 		Chart: "bitnami/grafana", Version: "8.7.0", ReleaseName: "g1",
