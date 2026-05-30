@@ -111,6 +111,7 @@ func New(deps Deps) http.Handler {
 		pr.Get("/api/clusters/{id}/apps/catalog", deps.AppsHandler.Catalog)
 		pr.Get("/api/clusters/{id}/apps/releases", deps.AppsHandler.Releases)
 		pr.Get("/api/clusters/{id}/apps/installs", deps.AppsHandler.Installs)
+		pr.Get("/api/clusters/{id}/apps/storage-classes", deps.AppsHandler.StorageClasses)
 		pr.Get("/api/apps/installs/{id}", deps.AppsHandler.GetInstall)
 
 		pr.Get("/api/clusters/{id}/apps/repos", deps.AppsRepos.List)

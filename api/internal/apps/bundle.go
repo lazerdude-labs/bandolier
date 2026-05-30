@@ -231,6 +231,9 @@ func (e *Executor) runBundleInstall(
 			Values:      choice.Values,
 			Atomic:      req.Atomic,
 		}
+		if choice.StorageClass != nil {
+			instReq.StorageClass = *choice.StorageClass
+		}
 
 		opErr := helm.Install(ctx, instReq, valuesPath, tee, tee)
 		if valuesPath != "" {

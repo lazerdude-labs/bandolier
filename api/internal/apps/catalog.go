@@ -106,6 +106,7 @@ var curated = []CatalogEntry{
 				Namespace: "monitoring",
 				Hostname:  "{release}.{fqdn}",
 				Required:  true,
+				Storage:   true,
 			},
 			// 3. Log aggregation. Optional — operators on resource-
 			// constrained clusters can skip Loki and rely on
@@ -121,6 +122,7 @@ var curated = []CatalogEntry{
 				Namespace: "monitoring",
 				Hostname:  "",
 				Required:  false,
+				Storage:   true,
 			},
 			// 4. Wiki / notes. Wiki.js v2 (chart appVersion 2) via the
 			// community chart hosted at charts.js.wiki — third-party
@@ -134,6 +136,7 @@ var curated = []CatalogEntry{
 				Namespace: "wiki",
 				Hostname:  "{release}.{fqdn}",
 				Required:  false,
+				Storage:   true,
 			},
 		},
 	},

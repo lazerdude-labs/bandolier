@@ -83,6 +83,8 @@ type InstallRequest struct {
 	IngressValuePath string `json:"-"` // resolved server-side from catalog
 	Values           string `json:"values,omitempty"` // raw YAML
 	Atomic           bool   `json:"atomic"`
+	// StorageClass, when non-empty, becomes --set global.storageClass=<value>.
+	StorageClass string `json:"storage_class,omitempty"`
 }
 
 // InstallResponse is the API output for accepted requests.
@@ -99,6 +101,9 @@ type BundleChart struct {
 	Namespace string `json:"namespace"`
 	Hostname  string `json:"hostname,omitempty"`
 	Required  bool   `json:"required"`
+	// Storage marks a member that provisions PVCs. The install modal shows a
+	// StorageClass picker only for these; charts without it get no picker.
+	Storage bool `json:"storage,omitempty"`
 }
 
 // BundleChartChoice is the per-chart operator selection at install time. When
@@ -112,6 +117,9 @@ type BundleChartChoice struct {
 	Hostname  string `json:"hostname,omitempty"`
 	Values    string `json:"values,omitempty"`
 	Skip      bool   `json:"skip"`
+	// StorageClass is the operator's per-chart pick. nil = use cluster default
+	// (no --set emitted). Applied as --set global.storageClass=<value>.
+	StorageClass *string `json:"storage_class,omitempty"`
 }
 
 // BundleInstallRequest is the API input for POST /api/clusters/{id}/apps/bundle.

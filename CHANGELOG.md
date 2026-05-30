@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] — 2026-05-28
+
+The homelab-essentials bundle installs Longhorn as its storage layer, but every other chart in the bundle (kube-prometheus-stack, Loki, Wiki.js) silently took whatever the cluster marked as its default StorageClass — with no way for an operator to point a chart at a different class at install time. On a cluster with more than one provisioner (e.g. Longhorn plus local-path) that meant editing values YAML by hand or accepting the default. v0.1.17 adds a per-chart StorageClass picker to the bundle install modal, backed by a new read-only endpoint that lists the cluster's StorageClasses. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.17` (or `:0.1` / `:latest`) to upgrade.
+
+### Added
+
+- **Per-chart StorageClass picker in the bundle install modal.** Bundle charts that consume persistent storage now carry a `storage: true` flag in the catalog; the install modal renders a StorageClass `<select>` for each such chart so the operator can pin it to a specific class instead of relying on the cluster default. The selection flows through `BundleChartChoice.storage_class` → `InstallRequest.StorageClass` → a `--set global.storageClass=<class>` helm flag; leaving it on "(cluster default)" emits no flag, preserving prior behavior. Charts that provide storage rather than consume it (Longhorn) are not flagged and show no picker. The dropdown is populated by a new endpoint, `GET /api/clusters/{id}/apps/storage-classes`, which shells out to `kubectl get storageclass -o json` (the established no-client-go pattern) and returns each class's name, provisioner, and default flag. The endpoint is **fail-open**: a kubeconfig-resolution failure returns an empty list with HTTP 200 (logged server-side) so the modal degrades to "(cluster default)" rather than blocking the install; only a kubectl execution error surfaces a 500. Results are cached per-cluster for 30s to match the releases cache. In the homelab-essentials bundle, kube-prometheus-stack, Loki, and Wiki.js are now `storage: true`.
+
+### Security
+
+- **StorageClass names are validated server-side before reaching helm.** The operator-supplied StorageClass value is checked against the Kubernetes RFC 1123 name pattern (`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`, ≤253 chars) at the `/apps/install`, `/apps/{release}/upgrade`, and `/apps/bundle` boundaries; invalid values get a 400. Although the value already travels as a discrete `exec.Command` argv element (no shell, so shell-metacharacter injection was never possible), helm splits `--set` on commas *within a single argument* — so an unvalidated value like `longhorn,someChart.admin.password=evil` could have smuggled an arbitrary second helm value into the release. The allowlist closes that values-injection vector. Defense in depth under the single-trusted-operator model; the picker UI already constrains the value to a `<select>` of real cluster classes, but the API now rejects hand-crafted requests too.
+
 ## [0.1.16] — 2026-05-26
 
 Two operator-reported gaps from the v0.1.15 deployment cycle: the Installed tab showed "No applications installed" no matter what was actually on the cluster (parse-error 500 on every `/apps/releases` call against any helm v3.16+ install), and operators who clicked away from an install detail page had no UI path back to the logs even though everything was still on disk. v0.1.16 fixes the parse error and ships an Install History sub-tab. Pull `ghcr.io/lazerdude-labs/bandolier/{api,ui,vault-agent,tls-init}:0.1.16` (or `:0.1` / `:latest`) to upgrade.
