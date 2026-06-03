@@ -279,12 +279,17 @@ func (h *ExecHandler) Install(w http.ResponseWriter, r *http.Request) {
 	req.ReleaseName = strings.TrimSpace(req.ReleaseName)
 	req.Namespace = strings.TrimSpace(req.Namespace)
 	req.StorageClass = strings.TrimSpace(req.StorageClass)
+	req.Hostname = strings.TrimSpace(req.Hostname)
 	if req.Chart == "" || req.Version == "" || req.ReleaseName == "" || req.Namespace == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "chart, version, release_name, namespace required"})
 		return
 	}
 	if req.StorageClass != "" && !validStorageClassName(req.StorageClass) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid storage_class"})
+		return
+	}
+	if req.Hostname != "" && !validHostname(req.Hostname) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid hostname"})
 		return
 	}
 
@@ -322,12 +327,17 @@ func (h *ExecHandler) Upgrade(w http.ResponseWriter, r *http.Request) {
 	req.Version = strings.TrimSpace(req.Version)
 	req.Namespace = strings.TrimSpace(req.Namespace)
 	req.StorageClass = strings.TrimSpace(req.StorageClass)
+	req.Hostname = strings.TrimSpace(req.Hostname)
 	if req.Chart == "" || req.Version == "" || req.Namespace == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "chart, version, namespace required"})
 		return
 	}
 	if req.StorageClass != "" && !validStorageClassName(req.StorageClass) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid storage_class"})
+		return
+	}
+	if req.Hostname != "" && !validHostname(req.Hostname) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid hostname"})
 		return
 	}
 
@@ -424,6 +434,10 @@ func (h *ExecHandler) InstallBundleHandler(w http.ResponseWriter, r *http.Reques
 	for _, c := range req.Choices {
 		if c.StorageClass != nil && *c.StorageClass != "" && !validStorageClassName(*c.StorageClass) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid storage_class in choices"})
+			return
+		}
+		if c.Hostname != "" && !validHostname(c.Hostname) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid hostname in choices"})
 			return
 		}
 	}

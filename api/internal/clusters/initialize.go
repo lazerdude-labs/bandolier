@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/ssh"
@@ -16,6 +17,7 @@ import (
 	"github.com/lazerdude-labs/bandolier/api/internal/dns"
 	"github.com/lazerdude-labs/bandolier/api/internal/profiles/homelab"
 	"github.com/lazerdude-labs/bandolier/api/internal/store"
+	"github.com/lazerdude-labs/bandolier/api/internal/validate"
 	"github.com/lazerdude-labs/bandolier/api/internal/vault"
 )
 
@@ -190,6 +192,25 @@ func (i *Initializer) Handle(w http.ResponseWriter, r *http.Request) {
 			Details: map[string]any{"reason": "missing_required_fields"},
 		})
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing required fields"})
+		return
+	}
+	// FQDN validation. The FQDN is optional, but when present it is later read
+	// back from Vault and spliced into `helm --set ingress.hostname=traefik.<fqdn>`
+	// during the Traefik deploy step (deployments/executor.go). helm splits
+	// --set on commas, so an unvalidated FQDN like "lab.local,admin.password=x"
+	// would smuggle an extra chart value — the same injection class the apps
+	// install/upgrade/bundle paths guard with validHostname. Validate here at
+	// the source, before it ever reaches Vault.
+	req.Network.FQDN = strings.TrimSpace(req.Network.FQDN)
+	if req.Network.FQDN != "" && !validate.Hostname(req.Network.FQDN) {
+		_, _ = audit.Write(r.Context(), i.store, audit.Entry{
+			ActorID: uid,
+			Action:  string(audit.ActionClusterInit),
+			Target:  id,
+			Outcome: audit.OutcomeFailure,
+			Details: map[string]any{"reason": "invalid_fqdn"},
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid fqdn"})
 		return
 	}
 	// VLAN bounds check. The Zod schema on the wizard enforces 0-4094, but

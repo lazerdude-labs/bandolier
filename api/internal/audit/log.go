@@ -28,7 +28,7 @@ func Write(ctx context.Context, s *store.Store, e Entry) (int64, error) {
 		return 0, fmt.Errorf("audit: action required")
 	}
 	switch e.Outcome {
-	case OutcomeSuccess, OutcomeFailure, OutcomeStarted, OutcomeSucceeded, OutcomeFailed:
+	case OutcomeSuccess, OutcomeFailure, OutcomeStarted, OutcomeSucceeded, OutcomeFailed, OutcomeCancelled:
 	default:
 		return 0, fmt.Errorf("audit: invalid outcome %q", e.Outcome)
 	}
