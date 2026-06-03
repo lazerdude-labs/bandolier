@@ -3,6 +3,9 @@ services:
     image: hashicorp/vault:1.16
     container_name: bandolier-vault
     restart: unless-stopped
+    depends_on:
+      tls-init:
+        condition: service_completed_successfully
     cap_add:
       - IPC_LOCK
     environment:
@@ -11,19 +14,34 @@ services:
         disable_mlock = false
         listener "tcp" {
           address = "0.0.0.0:8200"
-          tls_disable = 1
+          tls_cert_file = "/tls/vault.crt"
+          tls_key_file = "/tls/vault.key"
+          tls_client_ca_file = "/tls/ca.crt"
+          tls_require_and_verify_client_cert = true
         }
         storage "file" {
           path = "/vault/file"
         }
-        api_addr = "http://vault:8200"
+        api_addr = "https://vault:8200"
+      # CLI env for the healthcheck only. The `vault server` process reads its
+      # listener config from VAULT_LOCAL_CONFIG above; these vars only steer the
+      # `vault status` client used in the healthcheck, which must present the
+      # agent client cert because the listener requires+verifies client certs.
+      VAULT_ADDR: https://127.0.0.1:8200
+      VAULT_CACERT: /tls/ca.crt
+      VAULT_CLIENT_CERT: /tls/agent.crt
+      VAULT_CLIENT_KEY: /tls/agent.key
     command: ["server"]
     volumes:
       - vault-data:/vault/file
+      - tls:/tls:ro
     networks:
       - bandolier
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8200/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200"]
+      # Healthy when Vault answers, even sealed/uninitialized (exit 2) — the
+      # agent unseals afterward. Only a connect/TLS failure (exit 1) is
+      # unhealthy. $$ escapes compose interpolation so $? reaches the shell.
+      test: ["CMD-SHELL", "vault status >/dev/null 2>&1 || [ $$? -eq 2 ]"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -31,13 +49,19 @@ services:
   vault-agent:
     build: ./vault-init
     depends_on:
+      tls-init:
+        condition: service_completed_successfully
       vault:
         condition: service_healthy
     environment:
-      VAULT_ADDR: http://vault:8200
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /tls/ca.crt
+      VAULT_CLIENT_CERT: /tls/agent.crt
+      VAULT_CLIENT_KEY: /tls/agent.key
       # VAULT_AGENT_INTERVAL: 10  # seconds between seal-status checks
     volumes:
       - vault-init-state:/state
+      - tls:/tls:ro
     networks:
       - bandolier
     restart: unless-stopped
@@ -51,12 +75,17 @@ services:
   api:
     build: ../api
     depends_on:
+      tls-init:
+        condition: service_completed_successfully
       vault:
         condition: service_healthy
     environment:
       BANDOLIER_DB_PATH: /var/lib/bandolier/app.db
-      BANDOLIER_VAULT_ADDR: http://vault:8200
+      BANDOLIER_VAULT_ADDR: https://vault:8200
       BANDOLIER_VAULT_APPROLE_PATH: /vault-init-state/approle.json
+      BANDOLIER_VAULT_CACERT: /tls/ca.crt
+      BANDOLIER_VAULT_CLIENT_CERT: /tls/api.crt
+      BANDOLIER_VAULT_CLIENT_KEY: /tls/api.key
       BANDOLIER_TERRAFORM_DIR: /opt/bandolier/terraform
       BANDOLIER_ANSIBLE_DIR: /opt/bandolier/ansible
       BANDOLIER_TF_STATE_ROOT: /var/lib/bandolier/tf-state
@@ -65,6 +94,7 @@ services:
       - app-data:/var/lib/bandolier
       - tf-state:/var/lib/bandolier/tf-state
       - vault-init-state:/vault-init-state:ro
+      - tls:/tls:ro
       - ../terraform:/opt/bandolier/terraform:ro
       - ../ansible:/opt/bandolier/ansible:ro
     networks:

@@ -47,10 +47,15 @@ func main() {
 	}
 	defer func() { _ = st.Close() }()
 
-	addr := envWithDefault("BANDOLIER_VAULT_ADDR", "http://vault:8200")
+	addr := envWithDefault("BANDOLIER_VAULT_ADDR", "https://vault:8200")
 	approlePath := envWithDefault("BANDOLIER_VAULT_APPROLE_PATH", "/vault-init-state/approle.json")
+	vaultTLS := vaultpkg.TLSConfig{
+		CACert:     envWithDefault("BANDOLIER_VAULT_CACERT", "/tls/ca.crt"),
+		ClientCert: envWithDefault("BANDOLIER_VAULT_CLIENT_CERT", "/tls/api.crt"),
+		ClientKey:  envWithDefault("BANDOLIER_VAULT_CLIENT_KEY", "/tls/api.key"),
+	}
 
-	vaultCli, loginSecret, approleCreds, err := vaultpkg.LoginAppRole(ctx, addr, approlePath)
+	vaultCli, loginSecret, approleCreds, err := vaultpkg.LoginAppRole(ctx, addr, approlePath, vaultTLS)
 	if err != nil {
 		logger.Error("vault login", "err", err)
 		os.Exit(1)
