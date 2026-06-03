@@ -150,8 +150,11 @@ The `api` container reads its filesystem and service locations from environment 
 | Env var | Default | Purpose |
 |---|---|---|
 | `BANDOLIER_DB_PATH` | `/var/lib/bandolier/app.db` | SQLite app DB |
-| `BANDOLIER_VAULT_ADDR` | `http://vault:8200` | Vault HTTP endpoint |
+| `BANDOLIER_VAULT_ADDR` | `https://vault:8200` | Vault endpoint (mTLS; set scheme `http://` only for a non-TLS dev Vault) |
 | `BANDOLIER_VAULT_APPROLE_PATH` | `/vault-init-state/approle.json` | AppRole creds written by `vault-agent` |
+| `BANDOLIER_VAULT_CACERT` | `/tls/ca.crt` (compose); empty = no TLS | CA that signs Vault's server cert. Empty disables TLS (local dev against a non-TLS Vault) |
+| `BANDOLIER_VAULT_CLIENT_CERT` | `/tls/api.crt` (compose) | api client cert presented to Vault's mTLS listener |
+| `BANDOLIER_VAULT_CLIENT_KEY` | `/tls/api.key` (compose) | api client key for the above cert |
 | `BANDOLIER_TF_STATE_ROOT` | `/var/lib/bandolier/tf-state` | Per-cluster terraform state directories |
 | `BANDOLIER_LOG_ROOT` | `/var/lib/bandolier/logs` | Deploy + apps install log files |
 | `BANDOLIER_TERRAFORM_DIR` | (unset; image default) | Terraform module source dir mounted into the container |

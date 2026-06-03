@@ -49,10 +49,15 @@ func main() {
 
 	addr := envWithDefault("BANDOLIER_VAULT_ADDR", "https://vault:8200")
 	approlePath := envWithDefault("BANDOLIER_VAULT_APPROLE_PATH", "/vault-init-state/approle.json")
+	// Read the mTLS paths directly (not via envWithDefault): an explicitly
+	// empty BANDOLIER_VAULT_CACERT must reach the plaintext-dev path in
+	// LoginAppRole rather than silently falling back to the cert default. The
+	// compose stack sets all three; a local dev run against a non-TLS Vault
+	// leaves them empty.
 	vaultTLS := vaultpkg.TLSConfig{
-		CACert:     envWithDefault("BANDOLIER_VAULT_CACERT", "/tls/ca.crt"),
-		ClientCert: envWithDefault("BANDOLIER_VAULT_CLIENT_CERT", "/tls/api.crt"),
-		ClientKey:  envWithDefault("BANDOLIER_VAULT_CLIENT_KEY", "/tls/api.key"),
+		CACert:     os.Getenv("BANDOLIER_VAULT_CACERT"),
+		ClientCert: os.Getenv("BANDOLIER_VAULT_CLIENT_CERT"),
+		ClientKey:  os.Getenv("BANDOLIER_VAULT_CLIENT_KEY"),
 	}
 
 	vaultCli, loginSecret, approleCreds, err := vaultpkg.LoginAppRole(ctx, addr, approlePath, vaultTLS)

@@ -69,6 +69,12 @@ services:
         condition: service_completed_successfully
       vault:
         condition: service_healthy
+    # init.sh replaces the official vault image entrypoint, so it runs as root
+    # (rather than the image's su-exec drop to the vault user). It must write
+    # the unseal keys + approle creds (chmod 600) to the vault-init-state
+    # volume, which is root-owned. Mitigated by cap_drop ALL + no-new-privileges
+    # + read_only rootfs below; a non-root USER in vault-init/Dockerfile (with a
+    # chowned state volume) is a tracked follow-up.
     cap_drop:
       - ALL
     security_opt:
@@ -149,8 +155,10 @@ services:
   ui:
     build: ../ui
     depends_on:
-      - api
-      - tls-init
+      api:
+        condition: service_started
+      tls-init:
+        condition: service_completed_successfully
     # Hardening: drop all caps, then re-add only what the nginx master needs to
     # spawn workers as the unprivileged nginx user (CHOWN/SETUID/SETGID) and
     # bind :443 (NET_BIND_SERVICE). Immutable rootfs with tmpfs for nginx's
